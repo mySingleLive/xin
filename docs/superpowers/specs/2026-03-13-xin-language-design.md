@@ -109,15 +109,21 @@ void      // 无返回值
 
 **复合类型**：
 ```
-List<T>        // 列表接口
+List<T>        // 列表接口（动态大小）
 Map<K, V>      // 哈希表
+T[]            // 固定大小数组（栈分配或堆分配，取决于上下文）
 User           // 结构体类型
-*User          // 指针类型
+*User          // 指针类型（堆分配，引用计数）
 *mut User      // 可变指针
-User?          // 可空类型
+User?          // 可空类型（语法糖，等同于 Option<User>）
+Option<T>      // 可选值类型
 func(int, int) int  // 函数类型
-T[]            // 数组类型
 ```
+
+**类型关系说明**：
+- `List<T>` 是接口类型，`ArrayList<T>` 是其默认实现
+- `T[]` 是固定大小数组，与 `List<T>` 不同，不支持动态添加/删除
+- `T?` 是 `Option<T>` 的语法糖
 
 ### 2.3 变量声明
 
@@ -129,7 +135,6 @@ let name: string = "hello"
 // 简写语法（等效于 let）
 a := 10             // 等效于 let a = 10
 name := "hello"     // 类型自动推断
-x :== 0             // 声明并初始化（不带 let 关键字）
 
 // 可变变量
 var count = 0
@@ -154,7 +159,6 @@ u5 := mut User { name: "Yyy", age: 23 }        // 变量不可变，对象可变
 |-----|------|
 | `let x = 0` | 标准 let 声明 |
 | `x := 0` | 简写，等效于 `let x = 0` |
-| `x :== 0` | 简写变体，等效于 `let x = 0` |
 | `var x = 0` | 声明可变变量 |
 
 **可变性规则总结**：
@@ -374,11 +378,30 @@ let value = user!!.name          // 如果 user 为 null，运行时 panic
 
 ### 3.4 指针操作
 
-```xin
-// 指针声明
-let p: *User = User { name: "Alice", age: 30 }
-let mp: *mut User = mut User { name: "Bob", age: 25 }
+**内存分配语义**：
 
+当声明指针类型时，编译器自动在堆上分配内存并返回引用：
+
+```xin
+// 指针声明（自动堆分配）
+let p: *User = User { name: "Alice", age: 30 }
+// 等价于：在堆上分配 User 对象，p 指向该对象
+
+let mp: *mut User = mut User { name: "Bob", age: 25 }
+// 可变指针指向可变对象
+
+// 值类型 vs 指针类型
+let u1 = User { name: "A", age: 10 }     // 栈分配（值类型）
+let u2: *User = User { name: "B", age: 20 }  // 堆分配（指针类型）
+
+// 指针用于共享和长生命周期场景
+let shared: *User = u1                   // 错误：值类型不能直接赋给指针
+let shared: *User = User { name: "C", age: 30 }  // 创建新的堆分配
+```
+
+**指针使用**：
+
+```xin
 // 指针使用（自动解引用）
 print(p.name)                    // 自动解引用
 print(p.age)
@@ -399,6 +422,14 @@ func read(u: *User) void {
 }
 ```
 
+**指针类型内存管理**：
+
+| 类型 | 内存位置 | 管理方式 |
+|-----|---------|---------|
+| `User`（值类型） | 栈 | 作用域结束自动释放 |
+| `*User`（不可变指针） | 堆 | 引用计数，计数归零时释放 |
+| `*mut User`（可变指针） | 堆 | 引用计数，计数归零时释放 |
+
 ### 3.5 运算符优先级（从高到低）
 
 ```
@@ -415,7 +446,66 @@ func read(u: *User) void {
 
 ## 4. 类型系统与内存安全
 
-### 4.1 类型检查规则
+### 4.1 错误处理
+
+**Option<T> 类型**：
+
+`Option<T>` 表示一个值可能存在或不存在。`T?` 是 `Option<T>` 的语法糖。
+
+```xin
+// Option<T> 定义（内置类型）
+enum Option<T> {
+    Some(T)
+    None
+}
+
+// 使用可空类型
+let name: string? = null           // 等同于 Option<string>.None
+let age: int? = 25                 // 等同于 Option<int>.Some(25)
+
+// 安全解包
+if (name != null) {
+    print(name)                    // 此处 name 自动解包为 string
+}
+
+// Elvis 操作符
+let displayName = name ?? "Unknown"   // 如果 name 为 null，返回 "Unknown"
+
+// 安全导航操作符
+let user: User? = getUser()
+let age = user?.age                 // 返回 int?
+
+// 强制解包（运行时 panic）
+let value = user!!.name             // 如果 user 为 null，程序 panic
+```
+
+**Panic 机制**：
+
+当程序遇到不可恢复的错误时，会触发 panic：
+
+```xin
+// 强制解包 null 值
+let x: int? = null
+let y = x!!                         // panic: called !! on a null value
+
+// 数组越界
+let arr = [1, 2, 3]
+let item = arr[10]                  // panic: index out of bounds: 10 >= 3
+
+// 显式 panic
+panic("something went wrong")       // 手动触发 panic
+```
+
+**Panic 信息**：
+```
+thread 'main' panicked at 'called !! on a null value'
+  --> src/main.xin:5:13
+   |
+5  |     let y = x!!
+   |             ^^
+```
+
+### 4.2 类型检查规则
 
 **基础类型转换**：
 ```xin
@@ -446,7 +536,7 @@ let name: string = getName()        // 错误
 let name: string = getName() ?? ""  // OK
 ```
 
-### 4.2 所有权与生命周期
+### 4.3 所有权与生命周期
 
 **所有权转移规则**：
 
@@ -482,7 +572,7 @@ print(p2.name)           // OK：p2 也有效
 - 值类型和可变引用都是"独占所有权"，转移后原变量不可用，显式 `move` 让意图清晰
 - 不可变引用是"共享引用"，可以安全复制，无需 `move`
 
-### 4.3 内存管理：编译期 GC
+### 4.4 内存管理：编译期 GC
 
 **核心机制**：
 编译器在编译期自动追踪每个资源的生命周期，在作用域结束时自动插入释放代码。无运行时 GC，无手动内存管理。
@@ -564,7 +654,7 @@ struct File {
 }   // ← 自动调用 f.drop()，然后释放内存
 ```
 
-### 4.4 函数参数传递
+### 4.5 函数参数传递
 
 **参数传递方式对照表**：
 
@@ -574,11 +664,15 @@ struct File {
 | `var a: int` | 值传递 | ✅ 复制 | ✅ | `test(a)` | ✅ |
 | `u: User` | 值传递 | ✅ 复制 | ❌ | `test(u)` | ✅ |
 | `var u: User` | 值传递 | ✅ 复制 | ✅ | `test(u)` | ✅ |
-| `u: mut User` | 值传递 | ✅ 复制 | ✅ | `test(move u)` | ❌ |
-| `var u: mut User` | 值传递 | ✅ 复制 | ✅ | `test(move u)` | ❌ |
+| `u: mut User` | 值传递 | ✅ 复制，但转移所有权 | ✅ | `test(move u)` | ❌ |
+| `var u: mut User` | 值传递 | ✅ 复制，但转移所有权 | ✅ | `test(move u)` | ❌ |
 | `u: *User` | 引用传递 | ❌ | ❌ | `read(p)` | ✅ |
 | `u: *mut User` | 引用传递 | ❌ | ✅ | `modify(move m)` | ❌ |
 | `var u: *mut User` | 引用传递 | ❌ | ✅ | `modify(move m)` | ❌ |
+
+**说明**：
+- `mut User` 作为参数类型时，表示传递一个可变对象的副本。虽然是值传递（复制），但需要 `move` 关键字转移所有权，确保调用方知道该变量在调用后不可用。
+- 这种设计避免了复制可变对象后出现两个可变副本的混淆。
 
 **参数可变性对照表**：
 
@@ -634,7 +728,55 @@ let log = (msg: string) -> print(msg)
 | `func(int, int) int` | 两参数，返回 int |
 | `func(string, int) bool` | 多参数，返回 bool |
 
-### 5.3 作为函数参数
+### 5.3 Lambda 捕获语义
+
+**捕获规则**：
+
+Lambda 默认捕获外部变量的引用（借用）：
+
+```xin
+// 捕获不可变变量（引用捕获）
+let factor = 10
+let scale = (n: int) int -> n * factor   // 捕获 factor 的引用
+print(scale(5))                           // 输出: 50
+
+// 捕获可变变量需要 move 关键字
+var counter = 0
+let increment = move () -> {              // move 捕获所有权
+    counter = counter + 1
+    return counter
+}
+print(increment())                        // 输出: 1
+print(increment())                        // 输出: 2
+// counter 在此不再可用（已被 move）
+```
+
+**捕获方式总结**：
+
+| 外部变量类型 | 默认捕获方式 | 说明 |
+|------------|------------|------|
+| 不可变变量 `let` | 引用捕获 | Lambda 内可读取，不可修改 |
+| 可变变量 `var` | 需要 `move` | 必须显式转移所有权 |
+| 指针 `*T` | 引用捕获 | 共享引用，引用计数 +1 |
+| 可变指针 `*mut T` | 需要 `move` | 必须显式转移所有权 |
+
+**捕获生命周期**：
+
+```xin
+func makeCounter() func() int {
+    var count = 0
+    return move () -> {                  // 必须使用 move，否则 count 在函数返回后失效
+        count = count + 1
+        return count
+    }
+}
+
+let counter = makeCounter()
+print(counter())                          // 输出: 1
+print(counter())                          // 输出: 2
+```
+
+### 5.5 作为函数参数
 
 ```xin
 // Lambda 作为参数
@@ -650,7 +792,7 @@ test(1, (x: int, y: int) int -> {
 })                                  // 输出: 1
 ```
 
-### 5.4 尾随闭包语法
+### 5.6 尾随闭包语法
 
 **情况 1：单一无参尾随闭包**
 
@@ -708,7 +850,55 @@ test(1, 2, x: int, y: int) {
 
 ## 6. 资源管理
 
-### 6.1 自动资源关闭
+### 6.1 自动资源关闭语法
+
+**语法说明**：
+
+`func(resourceParam: ResourceType) { }` 是资源管理的特殊语法糖：
+
+- `resourceParam: ResourceType` 出现在函数调用的参数位置
+- 冒号后跟资源类型，表示该参数将由函数提供
+- 后续的 `{ }` 块是处理资源的 Lambda
+- Lambda 执行完毕后，资源自动关闭
+
+**等价转换**：
+
+```xin
+// 资源管理语法
+std.fs.readFile("test.txt", reader: FileReader) {
+    for (reader.hasNextLine()) {
+        print(reader.readLine())
+    }
+}
+
+// 等价于
+std.fs.readFile("test.txt", (reader: FileReader) -> {
+    for (reader.hasNextLine()) {
+        print(reader.readLine())
+    }
+})
+// readFile 函数内部会调用 reader.close()
+```
+
+**自定义资源管理函数**：
+
+```xin
+// 定义支持资源管理的函数
+func withFile(path: string, handler: func(FileReader)) void {
+    let reader = FileReader { path: path }
+    handler(reader)
+    reader.close()                    // 确保资源关闭
+}
+
+// 使用
+withFile("test.txt", f: FileReader) {
+    for (f.hasNextLine()) {
+        print(f.readLine())
+    }
+}
+```
+
+### 6.2 资源管理示例
 
 ```xin
 // 文件读取 - 自动关闭
@@ -731,7 +921,7 @@ std.net.connect("localhost:8080", conn: Connection) {
 }   // ← 自动关闭连接
 ```
 
-### 6.2 自定义资源管理
+### 6.3 自定义资源管理
 
 ```xin
 struct File implements Closable {
