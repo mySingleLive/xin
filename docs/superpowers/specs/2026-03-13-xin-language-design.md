@@ -285,6 +285,22 @@ interface Closable {
 }
 ```
 
+**接口方法 `mut` 修饰符**：
+
+- `mut func add(item: T)` — 表示此方法需要修改对象内部状态
+- 只能在可变对象上调用 `mut` 修饰的方法：`mut list.add(1)`
+- 在不可变对象上调用会编译错误：`let list = ArrayList[]; list.add(1) // 错误`
+
+**self 绑定**：
+
+结构体方法中 `self` 的绑定规则：
+
+| 方法修饰符 | self 绑定 | 说明 |
+|----------|----------|------|
+| 无修饰 | `self: *User` | 不可变借用，可读取字段 |
+| `mut` | `self: *mut User` | 可变借用，可修改字段 |
+```
+
 ### 2.8 集合类型
 
 ```xin
@@ -385,7 +401,7 @@ let value = user!!.name          // 如果 user 为 null，运行时 panic
 ```xin
 // 指针声明（自动堆分配）
 let p: *User = User { name: "Alice", age: 30 }
-// 等价于：在堆上分配 User 对象，p 指向该对象
+// 编译器行为：在堆上分配 User 对象，p 指向该对象
 
 let mp: *mut User = mut User { name: "Bob", age: 25 }
 // 可变指针指向可变对象
@@ -394,10 +410,17 @@ let mp: *mut User = mut User { name: "Bob", age: 25 }
 let u1 = User { name: "A", age: 10 }     // 栈分配（值类型）
 let u2: *User = User { name: "B", age: 20 }  // 堆分配（指针类型）
 
-// 指针用于共享和长生命周期场景
-let shared: *User = u1                   // 错误：值类型不能直接赋给指针
-let shared: *User = User { name: "C", age: 30 }  // 创建新的堆分配
+// 从值类型创建指针
+let shared: *User = u1                   // 错误：值类型不能直接转换为指针
+let shared: *User = User { name: u1.name, age: u1.age }  // OK：创建新的堆分配（复制字段）
+// 或使用专门的函数
+let shared = toPointer(u1)               // 假设 std 提供此函数，将值复制到堆
 ```
+
+**关键规则**：
+- `let p: *User = User { ... }` — 初始化时根据类型推断进行堆分配
+- `let p: *User = u1` — 不允许，因为 u1 是值类型（栈分配），不能隐式转换为指针
+- 这确保了内存位置的明确性：值类型在栈上，指针类型在堆上
 
 **指针使用**：
 
@@ -664,15 +687,15 @@ struct File {
 | `var a: int` | 值传递 | ✅ 复制 | ✅ | `test(a)` | ✅ |
 | `u: User` | 值传递 | ✅ 复制 | ❌ | `test(u)` | ✅ |
 | `var u: User` | 值传递 | ✅ 复制 | ✅ | `test(u)` | ✅ |
-| `u: mut User` | 值传递 | ✅ 复制，但转移所有权 | ✅ | `test(move u)` | ❌ |
-| `var u: mut User` | 值传递 | ✅ 复制，但转移所有权 | ✅ | `test(move u)` | ❌ |
+| `u: mut User` | 所有权转移 | ✅ 复制 | ✅ | `test(move u)` | ❌ |
+| `var u: mut User` | 所有权转移 | ✅ 复制 | ✅ | `test(move u)` | ❌ |
 | `u: *User` | 引用传递 | ❌ | ❌ | `read(p)` | ✅ |
-| `u: *mut User` | 引用传递 | ❌ | ✅ | `modify(move m)` | ❌ |
-| `var u: *mut User` | 引用传递 | ❌ | ✅ | `modify(move m)` | ❌ |
+| `u: *mut User` | 所有权转移（引用） | ❌ | ✅ | `modify(move m)` | ❌ |
+| `var u: *mut User` | 所有权转移（引用） | ❌ | ✅ | `modify(move m)` | ❌ |
 
 **说明**：
-- `mut User` 作为参数类型时，表示传递一个可变对象的副本。虽然是值传递（复制），但需要 `move` 关键字转移所有权，确保调用方知道该变量在调用后不可用。
-- 这种设计避免了复制可变对象后出现两个可变副本的混淆。
+- `mut User` 参数：虽然是值复制，但设计为需要 `move` 转移所有权。这确保调用方明确知道该可变对象将在函数内被修改，调用后原变量不再有效。避免同一可变对象在多处被修改的混淆。
+- `*mut User` 参数：传递可变引用，需要 `move` 转移引用的所有权。
 
 **参数可变性对照表**：
 
@@ -776,7 +799,7 @@ print(counter())                          // 输出: 1
 print(counter())                          // 输出: 2
 ```
 
-### 5.5 作为函数参数
+### 5.4 作为函数参数
 
 ```xin
 // Lambda 作为参数
@@ -792,7 +815,7 @@ test(1, (x: int, y: int) int -> {
 })                                  // 输出: 1
 ```
 
-### 5.6 尾随闭包语法
+### 5.5 尾随闭包语法
 
 **情况 1：单一无参尾随闭包**
 
