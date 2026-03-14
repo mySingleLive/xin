@@ -1,3 +1,7 @@
-//! IR for Xin
+//! Intermediate representation for Xin
 
-// Placeholder - will be implemented in Task 7
+mod builder;
+mod ir;
+
+pub use builder::IRBuilder;
+pub use ir::*;
