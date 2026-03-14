@@ -1,3 +1,7 @@
-//! Lexer for Xin
+//! Lexical analyzer for Xin
 
-// Placeholder - will be implemented in Task 4
+mod error;
+mod lexer;
+
+pub use error::LexerError;
+pub use lexer::Lexer;
