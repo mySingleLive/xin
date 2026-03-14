@@ -1,3 +1,15 @@
-//! AST definitions for Xin
+//! Abstract Syntax Tree definitions for Xin
 
-// Placeholder - will be implemented in Task 3
+mod decl;
+mod expr;
+mod stmt;
+mod token;
+mod ty;
+mod visit;
+
+pub use decl::*;
+pub use expr::*;
+pub use stmt::*;
+pub use token::*;
+pub use ty::*;
+pub use visit::*;
