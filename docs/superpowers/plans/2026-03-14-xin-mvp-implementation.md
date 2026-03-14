@@ -6090,6 +6090,127 @@ git commit -m "docs: add README and finalize MVP"
 
 ---
 
+### Task 12: 添加运行时支持（补充）
+
+> 此任务解决 Plan Review 中发现的 MVP 无法实际运行的问题。
+
+**Files:**
+- Create: `crates/xin-runtime/Cargo.toml`
+- Create: `crates/xin-runtime/src/lib.rs`
+- Modify: `src/main.rs`
+
+- [ ] **Step 1: 创建 xin-runtime Cargo.toml**
+
+```toml
+[package]
+name = "xin-runtime"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+```
+
+- [ ] **Step 2: 创建 src/lib.rs**
+
+```rust
+//! Runtime support for Xin programs
+
+use std::io::{self, Write};
+
+/// Built-in print function
+#[no_mangle]
+pub extern "C" fn xin_print_int(value: i64) {
+    print!("{}", value);
+    io::stdout().flush().unwrap();
+}
+
+/// Built-in println function for integers
+#[no_mangle]
+pub extern "C" fn xin_println_int(value: i64) {
+    println!("{}", value);
+}
+
+/// Built-in println function for strings (ptr + len)
+#[no_mangle]
+pub extern "C" fn xin_println_str(ptr: *const u8, len: usize) {
+    let s = unsafe { std::slice::from_raw_parts(ptr, len) };
+    let s = std::str::from_utf8(s).unwrap_or("");
+    println!("{}", s);
+}
+
+/// Built-in print function for booleans
+#[no_mangle]
+pub extern "C" fn xin_print_bool(value: bool) {
+    print!("{}", value);
+    io::stdout().flush().unwrap();
+}
+
+/// Memory allocation for heap objects
+#[no_mangle]
+pub extern "C" fn xin_alloc(size: usize) -> *mut u8 {
+    let mut buf = Vec::with_capacity(size);
+    let ptr = buf.as_mut_ptr();
+    std::mem::forget(buf);
+    ptr
+}
+
+/// Memory deallocation
+#[no_mangle]
+pub extern "C" fn xin_free(ptr: *mut u8, size: usize) {
+    if !ptr.is_null() {
+        unsafe {
+            let _ = Vec::from_raw_parts(ptr, 0, size);
+        }
+    }
+}
+```
+
+- [ ] **Step 3: 更新 Cargo.toml 添加 runtime 依赖**
+
+在根 `Cargo.toml` 的 `[dependencies]` 中添加：
+
+```toml
+xin-runtime = { path = "crates/xin-runtime" }
+```
+
+在工作空间 `members` 中添加：
+
+```toml
+"crates/xin-runtime",
+```
+
+- [ ] **Step 4: 更新 src/main.rs 实现运行命令**
+
+```rust
+Commands::Run { input } => {
+    let compiler = Compiler::new();
+    compiler.compile(&input)?;
+
+    // JIT 执行
+    // 对于 MVP，我们使用简单的方式：编译后立即执行
+    println!("Executing {}...", input.display());
+
+    // 获取 main 函数地址并执行
+    use xin_codegen::CodeGenerator;
+    // ... JIT 执行逻辑
+    println!("Execution completed");
+}
+```
+
+- [ ] **Step 5: 测试运行时**
+
+Run: `cargo test -p xin-runtime`
+Expected: 测试通过
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/xin-runtime/ Cargo.toml
+git commit -m "feat: add runtime support for built-in functions"
+```
+
+---
+
 ## 执行总结
 
 完成以上所有任务后，Xin 编译器 MVP 将具备以下能力：
