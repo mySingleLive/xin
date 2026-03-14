@@ -1,3 +1,7 @@
 //! Parser for Xin
 
-// Placeholder - will be implemented in Task 5
+mod error;
+mod parser;
+
+pub use error::ParserError;
+pub use parser::Parser;
