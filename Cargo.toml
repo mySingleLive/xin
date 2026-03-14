@@ -1,0 +1,30 @@
+[package]
+name = "xin"
+version = "0.1.0"
+edition = "2021"
+description = "Xin programming language compiler"
+license = "MIT"
+
+[dependencies]
+xin-ast = { path = "crates/xin-ast" }
+xin-lexer = { path = "crates/xin-lexer" }
+xin-parser = { path = "crates/xin-parser" }
+xin-semantic = { path = "crates/xin-semantic" }
+xin-ir = { path = "crates/xin-ir" }
+xin-codegen = { path = "crates/xin-codegen" }
+xin-diagnostics = { path = "crates/xin-diagnostics" }
+
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1.0"
+thiserror = "1.0"
+
+[workspace]
+members = [
+    "crates/xin-ast",
+    "crates/xin-lexer",
+    "crates/xin-parser",
+    "crates/xin-semantic",
+    "crates/xin-ir",
+    "crates/xin-codegen",
+    "crates/xin-diagnostics",
+]

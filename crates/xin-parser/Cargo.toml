@@ -1,0 +1,10 @@
+[package]
+name = "xin-parser"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+xin-ast = { path = "../xin-ast" }
+xin-lexer = { path = "../xin-lexer" }
+xin-diagnostics = { path = "../xin-diagnostics" }
+thiserror = "1.0"
