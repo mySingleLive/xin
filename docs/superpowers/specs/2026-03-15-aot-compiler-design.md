@@ -186,15 +186,16 @@ impl Compiler {
 
 ### 3.5 IR 层改造
 
-#### 3.5.1 外部函数声明
+#### 3.5.1 IR Module 扩展
 
-在 IR 模块级别添加外部函数声明：
+在 IR 模块级别添加外部函数声明和字符串常量表：
 
 ```rust
 // crates/xin-ir/src/ir.rs
 pub struct IRModule {
     pub functions: Vec<IRFunction>,
-    pub extern_functions: Vec<ExternFunction>,  // 新增：外部函数声明
+    pub extern_functions: Vec<ExternFunction>,  // 外部函数声明
+    pub strings: Vec<String>,                    // 字符串常量表
 }
 
 pub struct ExternFunction {
@@ -224,22 +225,16 @@ pub enum Instruction {
 
 #### 3.5.3 字符串字面量支持
 
-MVP 阶段支持字符串字面量，通过数据段实现：
+MVP 阶段支持字符串字面量，通过数据段实现。新增 `StringConst` 指令：
 
 ```rust
-// crates/xin-ir/src/ir.rs
-pub struct IRModule {
-    pub functions: Vec<IRFunction>,
-    pub extern_functions: Vec<ExternFunction>,
-    pub strings: Vec<String>,  // 新增：字符串常量表
-}
-
+// crates/xin-ir/src/ir.rs (Instruction 枚举新增)
 pub enum Instruction {
     // ... 现有指令 ...
 
     StringConst {
         result: Value,
-        string_index: usize,  // 索引到 strings 表
+        string_index: usize,  // 索引到 IRModule.strings 表
     },
 }
 ```
@@ -282,6 +277,8 @@ fn handle_println(&mut self, args: &[Expr]) {
 
 ```rust
 // src/runtime.rs
+use std::path::PathBuf;
+
 pub fn get_runtime_source() -> &'static str {
     // 编译时通过 include_str! 嵌入
     include_str!("../runtime/runtime.c")
@@ -289,7 +286,13 @@ pub fn get_runtime_source() -> &'static str {
 
 pub fn write_runtime_to_temp() -> Result<PathBuf, String> {
     let temp_dir = std::env::temp_dir();
-    let runtime_path = temp_dir.join("xin_runtime.c");
+    // 使用进程 ID 和时间戳避免并发冲突
+    let pid = std::process::id();
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("Time error: {}", e))?
+        .as_millis();
+    let runtime_path = temp_dir.join(format!("xin_runtime_{}_{}.c", pid, timestamp));
     std::fs::write(&runtime_path, get_runtime_source())
         .map_err(|e| format!("Failed to write runtime: {}", e))?;
     Ok(runtime_path)
