@@ -163,38 +163,88 @@ impl Compiler {
         codegen.compile(&ir_module)?;
         let obj_bytes = codegen.emit_object()?;
 
-        // 3. 新增：写入对象文件
-        let obj_path = output.with_extension("o");
+        // 3. 新增：写入临时对象文件
+        let temp_dir = std::env::temp_dir();
+        let obj_path = temp_dir.join("xin_output.o");
         std::fs::write(&obj_path, &obj_bytes)?;
 
-        // 4. 新增：链接
-        let linker = Linker::new();
-        let runtime_path = get_runtime_path(); // runtime/runtime.c
+        // 4. 新增：写入运行时到临时文件
+        let runtime_path = crate::runtime::write_runtime_to_temp()?;
+
+        // 5. 新增：链接
+        let linker = Linker::new()?;
         linker.link(&obj_path, &runtime_path, &output)?;
 
-        // 5. 清理临时文件
-        std::fs::remove_file(&obj_path)?;
+        // 6. 清理临时文件
+        let _ = std::fs::remove_file(&obj_path);
+        let _ = std::fs::remove_file(&runtime_path);
+
+        Ok(())
     }
 }
 ```
 
 ### 3.5 IR 层改造
 
-需要支持对外部函数的调用声明：
+#### 3.5.1 外部函数声明
+
+在 IR 模块级别添加外部函数声明：
+
+```rust
+// crates/xin-ir/src/ir.rs
+pub struct IRModule {
+    pub functions: Vec<IRFunction>,
+    pub extern_functions: Vec<ExternFunction>,  // 新增：外部函数声明
+}
+
+pub struct ExternFunction {
+    pub name: String,
+    pub params: Vec<IRType>,
+    pub return_type: Option<IRType>,
+}
+```
+
+#### 3.5.2 Call 指令统一
+
+使用现有的 `Call` 指令，通过 `is_extern` 字段区分内部和外部函数调用：
 
 ```rust
 // crates/xin-ir/src/ir.rs
 pub enum Instruction {
     // ... 现有指令 ...
 
-    // 调用外部函数
-    CallExtern {
+    Call {
         result: Option<Value>,
-        name: String,           // 函数名，如 "xin_print_int"
+        func: String,
         args: Vec<Value>,
+        is_extern: bool,  // 新增：标识是否为外部函数
     },
 }
 ```
+
+#### 3.5.3 字符串字面量支持
+
+MVP 阶段支持字符串字面量，通过数据段实现：
+
+```rust
+// crates/xin-ir/src/ir.rs
+pub struct IRModule {
+    pub functions: Vec<IRFunction>,
+    pub extern_functions: Vec<ExternFunction>,
+    pub strings: Vec<String>,  // 新增：字符串常量表
+}
+
+pub enum Instruction {
+    // ... 现有指令 ...
+
+    StringConst {
+        result: Value,
+        string_index: usize,  // 索引到 strings 表
+    },
+}
+```
+
+代码生成时，字符串放入只读数据段（`.rodata`），`StringConst` 返回字符串指针。
 
 ### 3.6 Print/Println 处理
 
@@ -205,8 +255,8 @@ pub enum Instruction {
 fn handle_println(&mut self, args: &[Expr]) {
     match args[0].ty {
         Type::Int => {
-            // 生成 IR: CallExtern { name: "xin_print_int", args: [...] }
-            // 生成 IR: CallExtern { name: "xin_println", args: [] }
+            // 生成 IR: Call { func: "xin_print_int", args: [...], is_extern: true }
+            // 生成 IR: Call { func: "xin_println", args: [], is_extern: true }
         }
         Type::Float => {
             // xin_print_float + xin_println
@@ -215,9 +265,65 @@ fn handle_println(&mut self, args: &[Expr]) {
             // xin_print_bool + xin_println
         }
         Type::String => {
+            // 字符串参数通过 StringConst 获取指针
             // xin_print_str + xin_println
         }
         _ => panic!("Unsupported type for println"),
+    }
+}
+```
+
+### 3.7 运行时文件部署
+
+运行时文件 `runtime.c` 的部署策略：
+
+1. **开发阶段**：直接使用项目源码目录 `runtime/runtime.c`
+2. **安装阶段**：编译时嵌入到编译器二进制中
+
+```rust
+// src/runtime.rs
+pub fn get_runtime_source() -> &'static str {
+    // 编译时通过 include_str! 嵌入
+    include_str!("../runtime/runtime.c")
+}
+
+pub fn write_runtime_to_temp() -> Result<PathBuf, String> {
+    let temp_dir = std::env::temp_dir();
+    let runtime_path = temp_dir.join("xin_runtime.c");
+    std::fs::write(&runtime_path, get_runtime_source())
+        .map_err(|e| format!("Failed to write runtime: {}", e))?;
+    Ok(runtime_path)
+}
+```
+
+### 3.8 链接器错误处理
+
+```rust
+// src/linker.rs
+impl Linker {
+    pub fn new() -> Result<Self, String> {
+        // 检测系统可用的 C 编译器
+        let compilers = ["cc", "gcc", "clang"];
+        for compiler in &compilers {
+            if which::which(compiler).is_ok() {
+                return Ok(Self { c_compiler: compiler.to_string() });
+            }
+        }
+        Err("No C compiler found. Please install cc, gcc, or clang.".to_string())
+    }
+
+    pub fn link(&self, obj_path: &Path, runtime_path: &Path, output: &Path) -> Result<(), String> {
+        let status = std::process::Command::new(&self.c_compiler)
+            .arg(obj_path)
+            .arg(runtime_path)
+            .arg("-o").arg(output)
+            .status()
+            .map_err(|e| format!("Failed to run linker: {}", e))?;
+
+        if !status.success() {
+            return Err(format!("Linker failed with exit code: {:?}", status.code()));
+        }
+        Ok(())
     }
 }
 ```
@@ -229,7 +335,8 @@ xin/
 ├── src/
 │   ├── main.rs           # CLI 入口（更新）
 │   ├── compiler.rs       # 编译器编排（更新）
-│   └── linker.rs         # 新增：链接器封装
+│   ├── linker.rs         # 新增：链接器封装
+│   └── runtime.rs        # 新增：运行时嵌入
 ├── crates/
 │   ├── xin-codegen/
 │   │   ├── src/
@@ -265,22 +372,24 @@ xin compile hello.xin --emit-obj -o hello.o
 | 步骤 | 内容 | 依赖 |
 |-----|------|------|
 | 1 | 创建 runtime/runtime.c | 无 |
-| 2 | 实现 src/linker.rs | 无 |
-| 3 | 更新 IR：添加 CallExtern 指令 | 无 |
-| 4 | 更新 IR Builder：处理 println/print | 步骤 3 |
-| 5 | 实现 aot.rs：AOT CodeGenerator | 步骤 3 |
-| 6 | 更新 compiler.rs：集成 AOT 流程 | 步骤 2, 4, 5 |
-| 7 | 更新 main.rs：完善 CLI | 步骤 6 |
-| 8 | 测试：编译运行 hello.xin | 步骤 7 |
+| 2 | 创建 src/runtime.rs（嵌入运行时源码） | 步骤 1 |
+| 3 | 实现 src/linker.rs | 无 |
+| 4 | 更新 IR：添加外部函数声明、字符串常量表、Call 的 is_extern 字段 | 无 |
+| 5 | 更新 IR Builder：处理 println/print，字符串字面量 | 步骤 4 |
+| 6 | 实现 aot.rs：AOT CodeGenerator（含字符串数据段） | 步骤 4 |
+| 7 | 更新 compiler.rs：集成 AOT 流程 | 步骤 2, 3, 5, 6 |
+| 8 | 更新 main.rs：完善 CLI | 步骤 7 |
+| 9 | 测试：编译运行 hello.xin | 步骤 8 |
 
 ## 7. 限制与后续工作
 
 ### 7.1 MVP 限制
 
 - 仅支持基本类型（int, float, bool, string）的打印
-- 不支持格式化字符串
+- 字符串字面量仅支持 ASCII 字符（无转义序列处理）
+- 不支持格式化字符串（`format` 函数）
 - 不支持命令行参数读取
-- 仅支持 macOS/Linux（Windows 需要额外处理）
+- 仅支持 macOS/Linux（Windows 需要额外处理链接器差异）
 
 ### 7.2 后续工作
 
@@ -288,4 +397,5 @@ xin compile hello.xin --emit-obj -o hello.o
 - 支持 `format` 格式化字符串
 - 支持 `readLine` 读取输入
 - 支持命令行参数 `std.os.args()`
-- 支持字符串字面量
+- 支持字符串转义序列（`\n`, `\t` 等）
+- 支持 UTF-8 字符串
