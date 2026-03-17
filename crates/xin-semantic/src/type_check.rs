@@ -392,12 +392,40 @@ impl TypeChecker {
 
                 match op {
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+                        // String concatenation: if either side is string, result is string
+                        if left_type == Type::String || right_type == Type::String {
+                            if *op == BinOp::Add {
+                                // Allow string concatenation with any basic type
+                                match (&left_type, &right_type) {
+                                    (Type::String, Type::String)
+                                    | (Type::String, Type::Int)
+                                    | (Type::String, Type::Float)
+                                    | (Type::String, Type::Bool)
+                                    | (Type::Int, Type::String)
+                                    | (Type::Float, Type::String)
+                                    | (Type::Bool, Type::String) => {
+                                        return Ok(Type::String);
+                                    }
+                                    _ => {
+                                        // Determine which type doesn't support string concatenation
+                                        let unsupported_type = match (&left_type, &right_type) {
+                                            (Type::String, _) => right_type.clone(),
+                                            (_, Type::String) => left_type.clone(),
+                                            _ => right_type.clone(),
+                                        };
+                                        return Err(SemanticError::TypeMismatch {
+                                            expected: Type::String,
+                                            found: unsupported_type,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        // Numeric operations
                         if left_type == Type::Int && right_type == Type::Int {
                             Ok(Type::Int)
                         } else if left_type == Type::Float || right_type == Type::Float {
                             Ok(Type::Float)
-                        } else if left_type == Type::String && *op == BinOp::Add {
-                            Ok(Type::String)
                         } else {
                             Err(SemanticError::TypeMismatch {
                                 expected: left_type.clone(),
