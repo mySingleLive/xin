@@ -2,7 +2,7 @@
 
 use xin_ast::{BinOp as AstBinOp, Decl, DeclKind, Expr, ExprKind, FuncDecl, SourceFile, Stmt, StmtKind, Type};
 
-use crate::{BinOp, ExternFunction, Instruction, IRFunction, IRModule, IRType, Value};
+use crate::{BinOp, ConcatType, ExternFunction, Instruction, IRFunction, IRModule, IRType, Value};
 
 /// IR Builder
 pub struct IRBuilder {
@@ -284,6 +284,36 @@ impl IRBuilder {
             ExprKind::Binary { op, left, right } => {
                 let left_val = self.build_expr(left)?;
                 let right_val = self.build_expr(right)?;
+
+                // Check if this is string concatenation
+                let left_type = Self::get_expr_type(left);
+                let right_type = Self::get_expr_type(right);
+
+                if *op == AstBinOp::Add {
+                    let is_string_concat = matches!(left_type, Some(Type::String))
+                        || matches!(right_type, Some(Type::String));
+
+                    if is_string_concat {
+                        let left_concat_type = self.type_to_concat_type(&left_type);
+                        let right_concat_type = self.type_to_concat_type(&right_type);
+
+                        let result = self.new_temp();
+                        self.emit(Instruction::StringConcat {
+                            result: result.clone(),
+                            left: left_val,
+                            left_type: left_concat_type,
+                            right: right_val,
+                            right_type: right_concat_type,
+                        });
+
+                        // Declare the external concat function
+                        self.declare_str_concat_extern(left_concat_type, right_concat_type);
+
+                        return Some(result);
+                    }
+                }
+
+                // Regular binary operation
                 let result = self.new_temp();
                 self.emit(Instruction::Binary {
                     result: result.clone(),
@@ -651,6 +681,44 @@ impl IRBuilder {
             ExprKind::Ident(_) => None, // Would need symbol table
             _ => None,
         }
+    }
+
+    /// Convert Type to ConcatType
+    fn type_to_concat_type(&self, ty: &Option<Type>) -> ConcatType {
+        match ty {
+            Some(Type::Int) => ConcatType::Int,
+            Some(Type::Float) => ConcatType::Float,
+            Some(Type::Bool) => ConcatType::Bool,
+            Some(Type::String) | None => ConcatType::String,
+            _ => ConcatType::String,
+        }
+    }
+
+    /// Declare string concat extern function if needed
+    fn declare_str_concat_extern(&mut self, left_type: ConcatType, right_type: ConcatType) {
+        let func_name = match (left_type, right_type) {
+            (ConcatType::String, ConcatType::String) => "xin_str_concat_ss",
+            (ConcatType::String, ConcatType::Int) => "xin_str_concat_si",
+            (ConcatType::Int, ConcatType::String) => "xin_str_concat_is",
+            (ConcatType::String, ConcatType::Float) => "xin_str_concat_sf",
+            (ConcatType::Float, ConcatType::String) => "xin_str_concat_fs",
+            (ConcatType::String, ConcatType::Bool) => "xin_str_concat_sb",
+            (ConcatType::Bool, ConcatType::String) => "xin_str_concat_bs",
+            _ => "xin_str_concat_ss", // fallback
+        };
+
+        let param_types = match (left_type, right_type) {
+            (ConcatType::String, ConcatType::String) => vec![IRType::Ptr("char".to_string()), IRType::Ptr("char".to_string())],
+            (ConcatType::String, ConcatType::Int) => vec![IRType::Ptr("char".to_string()), IRType::I64],
+            (ConcatType::Int, ConcatType::String) => vec![IRType::I64, IRType::Ptr("char".to_string())],
+            (ConcatType::String, ConcatType::Float) => vec![IRType::Ptr("char".to_string()), IRType::F64],
+            (ConcatType::Float, ConcatType::String) => vec![IRType::F64, IRType::Ptr("char".to_string())],
+            (ConcatType::String, ConcatType::Bool) => vec![IRType::Ptr("char".to_string()), IRType::Bool],
+            (ConcatType::Bool, ConcatType::String) => vec![IRType::Bool, IRType::Ptr("char".to_string())],
+            _ => vec![IRType::Ptr("char".to_string()), IRType::Ptr("char".to_string())],
+        };
+
+        self.declare_extern_if_needed(func_name, param_types, Some(IRType::Ptr("char".to_string())));
     }
 }
 
