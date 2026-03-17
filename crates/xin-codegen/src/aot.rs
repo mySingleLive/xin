@@ -4,7 +4,7 @@ use cranelift::prelude::*;
 use cranelift::codegen::ir::{ExtFuncData, ExternalName, UserExternalName, FuncRef, GlobalValue};
 use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module};
 use cranelift_object::ObjectModule;
-use xin_ir::{BinOp, ExternFunction, Instruction, IRFunction, IRModule, IRType};
+use xin_ir::{BinOp, ConcatType, ExternFunction, Instruction, IRFunction, IRModule, IRType};
 
 /// AOT Code generator using Cranelift ObjectModule
 pub struct AOTCodeGenerator {
@@ -380,11 +380,75 @@ impl AOTCodeGenerator {
             Instruction::Phi { .. } => {
                 // TODO: Implement phi nodes
             }
-            Instruction::StringConcat { .. } => {
-                // TODO: Implement string concatenation (Task 8)
+            Instruction::StringConcat { result, left, left_type, right, right_type } => {
+                // Determine which runtime function to call
+                let func_name = match (left_type, right_type) {
+                    (ConcatType::String, ConcatType::String) => "xin_str_concat_ss",
+                    (ConcatType::String, ConcatType::Int) => "xin_str_concat_si",
+                    (ConcatType::Int, ConcatType::String) => "xin_str_concat_is",
+                    (ConcatType::String, ConcatType::Float) => "xin_str_concat_sf",
+                    (ConcatType::Float, ConcatType::String) => "xin_str_concat_fs",
+                    (ConcatType::String, ConcatType::Bool) => "xin_str_concat_sb",
+                    (ConcatType::Bool, ConcatType::String) => "xin_str_concat_bs",
+                    _ => "xin_str_concat_ss",
+                };
+
+                let left_val = self.load_variable(builder, left, variables)?;
+                let right_val = self.load_variable(builder, right, variables)?;
+
+                // Get or create the function reference
+                let func_ref = if let Some(fr) = func_ref_cache.get(func_name) {
+                    *fr
+                } else {
+                    let func_id = *self.extern_func_ids.get(func_name)
+                        .expect("String concat function should be declared");
+                    let sig = self.func_sigs.get(func_name)
+                        .expect("Signature should exist")
+                        .clone();
+                    let sig_ref = builder.func.import_signature(sig);
+                    let user_func_name = builder.func.declare_imported_user_function(UserExternalName {
+                        namespace: 0,
+                        index: func_id.as_u32(),
+                    });
+                    let fr = builder.import_function(ExtFuncData {
+                        name: ExternalName::user(user_func_name),
+                        signature: sig_ref,
+                        colocated: true,
+                    });
+                    func_ref_cache.insert(func_name.to_string(), fr);
+                    fr
+                };
+
+                let call_val = builder.ins().call(func_ref, &[left_val, right_val]);
+                let ret_val = builder.inst_results(call_val)[0];
+                self.store_variable(builder, result, ret_val, variables, var_counter, self.pointer_type);
             }
-            Instruction::StringFree { .. } => {
-                // TODO: Implement string deallocation (Task 8)
+            Instruction::StringFree { value } => {
+                let val = self.load_variable(builder, value, variables)?;
+
+                let func_ref = if let Some(fr) = func_ref_cache.get("xin_str_free") {
+                    *fr
+                } else {
+                    let func_id = *self.extern_func_ids.get("xin_str_free")
+                        .expect("xin_str_free should be declared");
+                    let sig = self.func_sigs.get("xin_str_free")
+                        .expect("Signature should exist")
+                        .clone();
+                    let sig_ref = builder.func.import_signature(sig);
+                    let user_func_name = builder.func.declare_imported_user_function(UserExternalName {
+                        namespace: 0,
+                        index: func_id.as_u32(),
+                    });
+                    let fr = builder.import_function(ExtFuncData {
+                        name: ExternalName::user(user_func_name),
+                        signature: sig_ref,
+                        colocated: true,
+                    });
+                    func_ref_cache.insert("xin_str_free".to_string(), fr);
+                    fr
+                };
+
+                builder.ins().call(func_ref, &[val]);
             }
         }
         Ok(())
