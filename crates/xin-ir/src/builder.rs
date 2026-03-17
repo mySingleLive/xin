@@ -366,6 +366,8 @@ impl IRBuilder {
                             return self.handle_println(args);
                         } else if name == "print" {
                             return self.handle_print(args);
+                        } else if name == "printf" {
+                            return self.handle_printf(args);
                         }
 
                         // Regular function call
@@ -655,6 +657,30 @@ impl IRBuilder {
                 });
             }
         }
+        None
+    }
+
+    /// Handle printf(format, args...) - formatted print
+    fn handle_printf(&mut self, args: &[Expr]) -> Option<Value> {
+        if args.is_empty() {
+            return None;
+        }
+
+        // Build all arguments
+        let arg_vals: Vec<Value> = args.iter().filter_map(|a| self.build_expr(a)).collect();
+
+        // Call xin_printf
+        self.emit(Instruction::Call {
+            result: None,
+            func: "xin_printf".to_string(),
+            args: arg_vals,
+            is_extern: true,
+        });
+
+        // Declare external function
+        // xin_printf takes: const char* format, ... (variadic)
+        self.declare_extern_if_needed("xin_printf", vec![IRType::Ptr("char".to_string())], None);
+
         None
     }
 
