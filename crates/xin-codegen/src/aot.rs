@@ -194,6 +194,13 @@ impl AOTCodeGenerator {
         let mut global_value_cache: std::collections::HashMap<usize, GlobalValue> =
             std::collections::HashMap::new();
 
+        // Stack slots for alloca and stored values for load/store
+        let mut stack_slots: std::collections::HashMap<String, cranelift::codegen::ir::StackSlot> =
+            std::collections::HashMap::new();
+        // Map from ptr name to (cranelift Value, Type)
+        let mut stored_cranelift_values: std::collections::HashMap<String, (cranelift::prelude::Value, Type)> =
+            std::collections::HashMap::new();
+
         // Process instructions
         for instr in &func.instructions {
             self.compile_instruction(
@@ -203,6 +210,8 @@ impl AOTCodeGenerator {
                 &mut var_counter,
                 &mut func_ref_cache,
                 &mut global_value_cache,
+                &mut stack_slots,
+                &mut stored_cranelift_values,
             )?;
         }
 
@@ -228,25 +237,27 @@ impl AOTCodeGenerator {
         var_counter: &mut usize,
         func_ref_cache: &mut std::collections::HashMap<String, FuncRef>,
         global_value_cache: &mut std::collections::HashMap<usize, GlobalValue>,
+        stack_slots: &mut std::collections::HashMap<String, cranelift::codegen::ir::StackSlot>,
+        stored_cranelift_values: &mut std::collections::HashMap<String, (cranelift::prelude::Value, Type)>,
     ) -> Result<(), String> {
         match instr {
             Instruction::Const { result, value, ty } => {
-                let val = match ty {
+                let (val, cranelift_ty) = match ty {
                     IRType::I64 => {
                         let n: i64 = value.parse().unwrap_or(0);
-                        builder.ins().iconst(types::I64, n)
+                        (builder.ins().iconst(types::I64, n), types::I64)
                     }
                     IRType::F64 => {
                         let n: f64 = value.parse().unwrap_or(0.0);
-                        builder.ins().f64const(n)
+                        (builder.ins().f64const(n), types::F64)
                     }
                     IRType::Bool => {
                         let b = value == "true";
-                        builder.ins().iconst(types::I8, i64::from(b))
+                        (builder.ins().iconst(types::I8, i64::from(b)), types::I8)
                     }
-                    _ => builder.ins().iconst(types::I64, 0),
+                    _ => (builder.ins().iconst(types::I64, 0), types::I64),
                 };
-                self.store_variable(builder, result, val, variables, var_counter, types::I64);
+                self.store_variable(builder, result, val, variables, var_counter, cranelift_ty);
             }
             Instruction::StringConst { result, string_index } => {
                 let global_value = if let Some(gv) = global_value_cache.get(string_index) {
@@ -368,14 +379,70 @@ impl AOTCodeGenerator {
                 if let Some(result) = result {
                     // Get the return value (first return value)
                     let ret_val = builder.inst_results(call_val)[0];
-                    self.store_variable(builder, result, ret_val, variables, var_counter, types::I64);
+
+                    // Get return type from function signature
+                    let sig = self.func_sigs.get(func_name)
+                        .ok_or_else(|| format!("Signature not found for function {}", func_name))?;
+                    let ret_type = sig.returns.first()
+                        .map(|p| p.value_type)
+                        .unwrap_or(types::I64);
+
+                    self.store_variable(builder, result, ret_val, variables, var_counter, ret_type);
                 }
             }
             Instruction::Jump(_) | Instruction::Branch { .. } | Instruction::Label(_) => {
                 // TODO: Implement control flow
             }
-            Instruction::Alloca { .. } | Instruction::Store { .. } | Instruction::Load { .. } => {
-                // TODO: Implement memory operations
+            Instruction::Alloca { result, ty } => {
+                // Create a stack slot for the variable
+                let size = match ty {
+                    IRType::I64 => 8,
+                    IRType::F64 => 8,
+                    IRType::Bool => 1,
+                    IRType::String => 8, // pointer size
+                    IRType::Ptr(_) => 8,
+                    IRType::Void => 0,
+                };
+                let slot = builder.create_sized_stack_slot(cranelift::codegen::ir::StackSlotData::new(
+                    cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
+                    size,
+                    0,
+                ));
+                stack_slots.insert(result.0.clone(), slot);
+            }
+            Instruction::Store { value, ptr } => {
+                // Get the value to store
+                let val = self.load_variable(builder, value, variables)?;
+                let val_type = builder.func.dfg.value_type(val);
+
+                // Store in our tracking map for later loads
+                stored_cranelift_values.insert(ptr.0.clone(), (val, val_type));
+
+                // Also store to stack slot if we have one
+                if let Some(&slot) = stack_slots.get(&ptr.0) {
+                    let addr = builder.ins().stack_addr(self.pointer_type, slot, 0);
+                    builder.ins().store(cranelift::codegen::ir::MemFlags::trusted(), val, addr, 0);
+                }
+            }
+            Instruction::Load { result, ptr } => {
+                // Try to load from stored values first
+                if let Some((val, val_type)) = stored_cranelift_values.get(&ptr.0) {
+                    self.store_variable(builder, result, *val, variables, var_counter, *val_type);
+                } else if let Some(&slot) = stack_slots.get(&ptr.0) {
+                    // Load from stack slot
+                    let addr = builder.ins().stack_addr(self.pointer_type, slot, 0);
+                    let val = builder.ins().load(
+                        self.pointer_type,
+                        cranelift::codegen::ir::MemFlags::trusted(),
+                        addr,
+                        0,
+                    );
+                    self.store_variable(builder, result, val, variables, var_counter, self.pointer_type);
+                } else {
+                    // Default: return 0
+                    let val = builder.ins().iconst(types::I64, 0);
+                    self.store_variable(builder, result, val, variables, var_counter, types::I64);
+                }
             }
             Instruction::Phi { .. } => {
                 // TODO: Implement phi nodes

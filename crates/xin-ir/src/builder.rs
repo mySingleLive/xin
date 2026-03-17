@@ -10,6 +10,8 @@ pub struct IRBuilder {
     current_function: Option<IRFunction>,
     temp_counter: usize,
     label_counter: usize,
+    /// Variable types in current scope
+    variable_types: std::collections::HashMap<String, Type>,
 }
 
 impl IRBuilder {
@@ -19,6 +21,7 @@ impl IRBuilder {
             current_function: None,
             temp_counter: 0,
             label_counter: 0,
+            variable_types: std::collections::HashMap::new(),
         }
     }
 
@@ -102,11 +105,18 @@ impl IRBuilder {
                 if let Some(value) = &var.value {
                     let val = self.build_expr(value);
                     if let Some(v) = val {
-                        let ptr = self.new_temp();
+                        // Use the variable name as the pointer
+                        let ptr = Value(format!("%{}", var.name));
                         let ty = var.type_annotation
                             .as_ref()
                             .map(|t| self.convert_type(t))
-                            .unwrap_or(IRType::I64);
+                            .unwrap_or_else(|| self.infer_expr_type(value));
+
+                        // Record variable type for later use
+                        let ast_type = var.type_annotation.clone()
+                            .unwrap_or_else(|| self.infer_ast_type(value));
+                        self.variable_types.insert(var.name.clone(), ast_type);
+
                         self.emit(Instruction::Alloca {
                             result: ptr.clone(),
                             ty,
@@ -515,7 +525,7 @@ impl IRBuilder {
 
         let arg = &args[0];
         let arg_val = self.build_expr(arg)?;
-        let arg_type = Self::get_expr_type(arg);
+        let arg_type = self.get_expr_type_with_vars(arg);
 
         match arg_type {
             Some(Type::Int) => {
@@ -596,6 +606,8 @@ impl IRBuilder {
                     args: vec![],
                     is_extern: true,
                 });
+                self.declare_extern_if_needed("xin_print_int", vec![IRType::I64], None);
+                self.declare_extern_if_needed("xin_println", vec![], None);
             }
         }
         None
@@ -609,7 +621,7 @@ impl IRBuilder {
 
         let arg = &args[0];
         let arg_val = self.build_expr(arg)?;
-        let arg_type = Self::get_expr_type(arg);
+        let arg_type = self.get_expr_type_with_vars(arg);
 
         match arg_type {
             Some(Type::Int) => {
@@ -655,6 +667,7 @@ impl IRBuilder {
                     args: vec![arg_val],
                     is_extern: true,
                 });
+                self.declare_extern_if_needed("xin_print_int", vec![IRType::I64], None);
             }
         }
         None
@@ -666,8 +679,24 @@ impl IRBuilder {
             return None;
         }
 
-        // Build all arguments
-        let arg_vals: Vec<Value> = args.iter().filter_map(|a| self.build_expr(a)).collect();
+        // Build all arguments and collect their types
+        let mut arg_vals: Vec<Value> = Vec::new();
+        let mut param_types: Vec<IRType> = Vec::new();
+
+        for arg in args {
+            if let Some(val) = self.build_expr(arg) {
+                arg_vals.push(val);
+                let arg_type = self.get_expr_type_with_vars(arg);
+                let ir_type = match arg_type {
+                    Some(Type::Int) => IRType::I64,
+                    Some(Type::Float) => IRType::F64,
+                    Some(Type::Bool) => IRType::Bool,
+                    Some(Type::String) => IRType::Ptr("char".to_string()),
+                    _ => IRType::I64,
+                };
+                param_types.push(ir_type);
+            }
+        }
 
         // Call xin_printf
         self.emit(Instruction::Call {
@@ -677,9 +706,8 @@ impl IRBuilder {
             is_extern: true,
         });
 
-        // Declare external function
-        // xin_printf takes: const char* format, ... (variadic)
-        self.declare_extern_if_needed("xin_printf", vec![IRType::Ptr("char".to_string())], None);
+        // Declare external function with all parameter types
+        self.declare_extern_if_needed("xin_printf", param_types, None);
 
         None
     }
@@ -705,6 +733,71 @@ impl IRBuilder {
             ExprKind::BoolLiteral(_) => Some(Type::Bool),
             ExprKind::StringLiteral(_) => Some(Type::String),
             ExprKind::Ident(_) => None, // Would need symbol table
+            _ => None,
+        }
+    }
+
+    /// Infer the IR type from an expression
+    fn infer_expr_type(&self, expr: &Expr) -> IRType {
+        match &expr.kind {
+            ExprKind::IntLiteral(_) => IRType::I64,
+            ExprKind::FloatLiteral(_) => IRType::F64,
+            ExprKind::BoolLiteral(_) => IRType::Bool,
+            ExprKind::StringLiteral(_) => IRType::String,
+            ExprKind::Binary { op, left, right } => {
+                // Check if this is string concatenation
+                if *op == AstBinOp::Add {
+                    let left_type = Self::get_expr_type(left);
+                    let right_type = Self::get_expr_type(right);
+                    if matches!(left_type, Some(Type::String)) || matches!(right_type, Some(Type::String)) {
+                        return IRType::String;
+                    }
+                }
+                IRType::I64
+            }
+            _ => IRType::I64,
+        }
+    }
+
+    /// Infer AST type from an expression
+    fn infer_ast_type(&self, expr: &Expr) -> Type {
+        match &expr.kind {
+            ExprKind::IntLiteral(_) => Type::Int,
+            ExprKind::FloatLiteral(_) => Type::Float,
+            ExprKind::BoolLiteral(_) => Type::Bool,
+            ExprKind::StringLiteral(_) => Type::String,
+            ExprKind::Binary { op, left, right } => {
+                if *op == AstBinOp::Add {
+                    let left_type = self.infer_ast_type(left);
+                    let right_type = self.infer_ast_type(right);
+                    if matches!(left_type, Type::String) || matches!(right_type, Type::String) {
+                        return Type::String;
+                    }
+                }
+                Type::Int
+            }
+            _ => Type::Int,
+        }
+    }
+
+    /// Get the type of an expression (with variable type tracking)
+    fn get_expr_type_with_vars(&self, expr: &Expr) -> Option<Type> {
+        match &expr.kind {
+            ExprKind::IntLiteral(_) => Some(Type::Int),
+            ExprKind::FloatLiteral(_) => Some(Type::Float),
+            ExprKind::BoolLiteral(_) => Some(Type::Bool),
+            ExprKind::StringLiteral(_) => Some(Type::String),
+            ExprKind::Ident(name) => self.variable_types.get(name).cloned(),
+            ExprKind::Binary { op, left, right } => {
+                if *op == AstBinOp::Add {
+                    let left_type = self.get_expr_type_with_vars(left);
+                    let right_type = self.get_expr_type_with_vars(right);
+                    if matches!(left_type, Some(Type::String)) || matches!(right_type, Some(Type::String)) {
+                        return Some(Type::String);
+                    }
+                }
+                Some(Type::Int)
+            }
             _ => None,
         }
     }

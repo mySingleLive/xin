@@ -1,0 +1,27 @@
+// string_test.xin
+// Test file for string operations in Xin language
+
+func main() {
+    // Basic string concatenation
+    let s1 = "Hello" + " " + "World"
+    println(s1)
+
+    // String + Int
+    let s2 = "Count: " + 42
+    println(s2)
+
+    // Int + String
+    let s3 = 100 + " points"
+    println(s3)
+
+    // String + Float
+    let s4 = "Pi = " + 3.14159
+    println(s4)
+
+    // String + Bool
+    let s5 = "Flag: " + true
+    println(s5)
+
+    // Note: printf with variadic arguments requires special handling
+    // which is not yet fully implemented
+}
