@@ -380,6 +380,12 @@ impl AOTCodeGenerator {
             Instruction::Phi { .. } => {
                 // TODO: Implement phi nodes
             }
+            Instruction::StringConcat { .. } => {
+                // TODO: Implement string concatenation (Task 8)
+            }
+            Instruction::StringFree { .. } => {
+                // TODO: Implement string deallocation (Task 8)
+            }
         }
         Ok(())
     }

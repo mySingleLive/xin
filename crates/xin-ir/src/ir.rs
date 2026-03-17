@@ -36,6 +36,15 @@ impl fmt::Display for IRType {
     }
 }
 
+/// Type of operand in string concatenation
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConcatType {
+    String,
+    Int,
+    Float,
+    Bool,
+}
+
 /// External function declaration
 #[derive(Debug, Clone)]
 pub struct ExternFunction {
@@ -98,6 +107,20 @@ pub enum Instruction {
     Phi {
         result: Value,
         incoming: Vec<(Value, String)>,
+    },
+
+    /// String concatenation: %result = concat left, right
+    StringConcat {
+        result: Value,
+        left: Value,
+        left_type: ConcatType,
+        right: Value,
+        right_type: ConcatType,
+    },
+
+    /// String deallocation: free value
+    StringFree {
+        value: Value,
     },
 }
 
