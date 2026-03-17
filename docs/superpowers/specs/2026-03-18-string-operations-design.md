@@ -73,8 +73,36 @@ help: strings can be concatenated with '+', or use explicit conversion
 
 拼接产生的新字符串在堆上分配，由编译期 GC 系统自动管理生命周期。
 
+**字符串所有权语义**:
+
+| 来源 | 存储位置 | 是否需要释放 | 所有权规则 |
+|-----|---------|-------------|-----------|
+| 字符串字面量 `"hello"` | 静态存储（只读数据段） | 否 | 不可变，程序生命周期有效 |
+| 拼接结果 `"a" + "b"` | 堆 | 是 | 拥有者负责释放 |
+| 函数返回的字符串 | 堆 | 是（调用者） | 所有权转移给调用者 |
+
+**函数参数传递**:
+- 字符串作为参数传递时，传递的是指针引用（非复制）
+- 函数内不获取所有权，调用者的所有权不受影响
+
+**函数返回字符串**:
+- 函数返回拼接产生的字符串时，所有权转移给调用者
+- 调用者负责在适当时机释放
+
+```c
+// Xin 源码
+func makeGreeting(name: string) string {
+    return "Hello, " + name + "!"
+}
+
+// 调用者
+let greeting = makeGreeting("Alice")  // greeting 获得所有权
+println(greeting)
+// greeting 作用域结束，自动释放
+```
+
 **编译期内存回收**:
-- 编译器追踪每个字符串变量的作用域
+- 编译器追踪每个堆分配字符串变量的作用域
 - 当引用字符串的变量超出生命周期范围（函数结束、代码块结束）时，编译器自动插入释放代码
 - 无需运行时 GC，无手动内存管理
 
@@ -106,42 +134,25 @@ xin_str_free(s);                                // 作用域结束时释放 s
 
 ```c
 // Xin 源码
-func example(x: int) {
-    let s = "value"
-    if x > 0 {
-        return s
-    }
-    println(s)
-}
-
-// 生成的 C 代码
-void example(long long x) {
-    char* s = "value";
-    if (x > 0) {
-        // return 前不需要释放 s，因为 s 被返回使用
-        // 注：如果 s 是动态分配的，需要考虑所有权转移
-        xin_print_str(s);
-        return;
-    }
-    xin_println_str(s);
-    xin_str_free(s);  // 函数结尾释放
-}
-```
-
-**代码生成示例**:
-```c
-// Xin 源码
-func example() {
+func example(x: int) string {
     let s = "Hello" + " World"
+    if x > 0 {
+        return s  // 所有权转移给调用者，不释放
+    }
     println(s)
-}  // s 在此处自动释放
+    return ""  // 返回空字面量（静态），不需要释放；s 在此之前释放
+}
 
 // 生成的 C 代码
-void example() {
+char* example(long long x) {
     char* s = xin_str_concat_ss("Hello", " World");
+    if (x > 0) {
+        return s;  // 所有权转移，不释放
+    }
     xin_print_str(s);
     xin_println();
-    xin_str_free(s);  // 编译器自动插入
+    xin_str_free(s);  // 不返回 s，需要释放
+    return "";        // 返回静态字符串
 }
 ```
 
@@ -253,11 +264,39 @@ printf("Hex: 0x%X\n", 255)
 - 格式字符串末尾的孤立 `%` → 输出 `%` 并继续
 - 空指针字符串 → 输出 `(null)`
 
+**`%b` 占位符实现**:
+- `%b` 支持 `printf("%5b", true)` 格式，宽度修饰符生效
+- 运行时预处理：扫描格式字符串，遇到 `%b` 时：
+  1. 解析宽度修饰符（如 `%5b` 的 `5`）
+  2. 根据 bool 值生成 `"true"` 或 `"false"`
+  3. 应用宽度格式化（右对齐，空格填充）
+  4. 输出结果
+
 **实现策略**:
-- `%d`, `%f`, `%s`, `%c`, `%x`, `%X`, `%o` 等标准占位符：直接调用 C 的 `vprintf`
-- `%b`（布尔值）占位符：运行时自定义处理，将 `true` 输出为 `"true"`，`false` 输出为 `"false"`
+- 标准 C 占位符（`%d`, `%f`, `%s` 等）：直接调用 C 的 `vprintf`
+- `%b` 占位符：运行时自定义处理函数
 - IR 生成阶段传递格式字符串指针和参数列表
-- 运行时函数 `xin_printf` 处理 `%b` 后调用 `vprintf` 处理剩余占位符
+
+**`%b` 运行时处理算法**:
+```c
+// 伪代码
+void xin_printf(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+
+    for (each %specifier in format) {
+        if (specifier == '%b') {
+            int width = parse_width(specifier);
+            bool val = va_arg(args, int);
+            const char* str = val ? "true" : "false";
+            print_with_width(str, width);  // 应用宽度
+        } else {
+            // 使用标准 printf 处理
+            ...
+        }
+    }
+}
+```
 
 ### 3.4 类型检查
 
@@ -291,6 +330,14 @@ error: printf argument count mismatch
    |
 3  |     printf("%d %s\n", 42)
    |     ^^^^^^^^^^^^^^^^^^^^^ expected 2 arguments, found 1
+```
+
+```
+error: printf argument count mismatch
+  --> file.xin:3:5
+   |
+3  |     printf("hello", 42)
+   |     ^^^^^^^^^^^^^^^^^^^ expected 0 arguments, found 1
 ```
 
 ```
