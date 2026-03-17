@@ -26,6 +26,7 @@ let s5 = "A" + "B" + "C"           // "ABC" (左结合)
 |-----------|-----------|
 | `int` | 十进制字符串，如 `42` → `"42"`，`-7` → `"-7"` |
 | `float` | 最精简表示，如 `3.14` → `"3.14"`，`100.0` → `"100"` |
+| `float` (特殊值) | `NaN` → `"NaN"`，`Infinity` → `"Infinity"`，`-Infinity` → `"-Infinity"` |
 | `bool` | `"true"` 或 `"false"` |
 
 ### 2.3 类型检查规则
@@ -41,6 +42,17 @@ else if left_type == float || right_type == float:
     return float
 else:
     error: type mismatch
+```
+
+**错误消息格式**:
+```
+error: incompatible types for '+' operator
+  --> file.xin:5:9
+   |
+5  |     let x = someStruct + 10
+   |             ^^^^^^^^^^^^^^^ cannot add 'SomeStruct' and 'int'
+   |
+help: strings can be concatenated with '+', or use explicit conversion
 ```
 
 ### 2.4 运行时函数
@@ -59,11 +71,25 @@ else:
 
 ### 2.5 内存管理
 
-拼接产生的新字符串在堆上分配。调用者负责释放返回的字符串。
+拼接产生的新字符串在堆上分配。
 
-在 MVP 阶段，采用简单的内存管理策略：
-- 所有字符串拼接结果由运行时分配
-- 主函数结束时统一释放
+**MVP 阶段策略**:
+- 运行时维护一个全局字符串分配列表
+- 每次拼接时，新字符串添加到列表中
+- 程序退出时，`xin_runtime_cleanup()` 函数释放所有分配的字符串
+
+**运行时函数**:
+```c
+// 初始化运行时（程序启动时调用）
+void xin_runtime_init(void);
+
+// 清理所有分配的字符串（程序退出时调用）
+void xin_runtime_cleanup(void);
+```
+
+**未来扩展**:
+- 集成到编译期 GC 系统
+- 实现引用计数或作用域追踪
 
 ## 3. 内置打印函数
 
@@ -156,6 +182,15 @@ printf("Hex: 0x%X\n", 255)
 // 输出: Hex: 0xFF
 ```
 
+**错误处理**（编译期）:
+- 占位符数量与参数数量不匹配 → 编译错误
+- 参数类型与占位符类型不匹配 → 编译错误
+- 未知占位符（如 `%z`）→ 编译错误
+
+**错误处理**（运行时）:
+- 格式字符串末尾的孤立 `%` → 输出 `%` 并继续
+- 空指针字符串 → 输出 `(null)`
+
 **实现策略**:
 - IR 生成阶段传递格式字符串指针和参数列表
 - 运行时直接调用 C 的 `vprintf`
@@ -169,8 +204,8 @@ printf("Hex: 0x%X\n", 255)
 
 **printf**:
 - 第一个参数必须是 `string` 类型
-- 参数数量必须与格式字符串中的占位符数量匹配
-- 参数类型必须与对应占位符兼容
+- 参数数量必须与格式字符串中的占位符数量匹配（编译期错误）
+- 参数类型必须与对应占位符兼容（编译期错误）
 - 返回类型为 `void`
 
 **占位符类型检查规则**:
@@ -179,17 +214,40 @@ printf("Hex: 0x%X\n", 255)
 - `%s` → 需要 `string` 类型
 - `%b` → 需要 `bool` 类型
 
+**占位符解析算法**:
+1. 扫描格式字符串，识别所有 `%` 后跟的有效占位符
+2. 统计占位符数量（跳过 `%%`）
+3. 检查参数数量是否匹配
+4. 按顺序检查每个参数类型是否与占位符匹配
+
+**错误消息格式**:
+```
+error: printf argument count mismatch
+  --> file.xin:3:5
+   |
+3  |     printf("%d %s\n", 42)
+   |     ^^^^^^^^^^^^^^^^^^^^^ expected 2 arguments, found 1
+```
+
+```
+error: printf argument type mismatch
+  --> file.xin:3:5
+   |
+3  |     printf("%d\n", "hello")
+   |                    ^^^^^^^ expected 'int' for '%d', found 'string'
+```
+
 ## 4. 实现细节
 
 ### 4.1 修改文件列表
 
-| 文件 | 修改内容 |
-|-----|---------|
-| `crates/xin-semantic/src/type_check.rs` | 字符串 `+` 类型检查；`printf` 类型检查 |
-| `crates/xin-ir/src/ir.rs` | 添加字符串拼接 IR 指令 |
-| `crates/xin-ir/src/builder.rs` | 字符串拼接 IR 生成 |
-| `crates/xin-codegen/src/aot.rs` | 字符串拼接代码生成 |
-| `runtime/runtime.c` | 字符串拼接运行时函数；`printf` 实现 |
+| 文件 | 状态 | 修改内容 |
+|-----|------|---------|
+| `crates/xin-semantic/src/type_check.rs` | 修改 | 字符串 `+` 类型检查；`printf` 类型检查 |
+| `crates/xin-ir/src/ir.rs` | 修改 | 添加字符串拼接 IR 指令 |
+| `crates/xin-ir/src/builder.rs` | 修改 | 字符串拼接 IR 生成 |
+| `crates/xin-codegen/src/aot.rs` | 修改 | 字符串拼接代码生成 |
+| `runtime/runtime.c` | 修改 | 字符串拼接运行时函数；`printf` 实现 |
 
 ### 4.2 IR 扩展
 
@@ -260,6 +318,24 @@ func test_bool_concat() {
     let s = "Flag is " + true
     println(s)  // 输出: Flag is true
 }
+
+// 边界情况：空字符串
+func test_empty_string_concat() {
+    let a = "" + ""
+    let b = "" + "hello"
+    let c = "world" + ""
+    println(a)  // 输出: (空行)
+    println(b)  // 输出: hello
+    println(c)  // 输出: world
+}
+
+// 特殊浮点值
+func test_special_float_concat() {
+    let nan_str = "Value: " + (0.0 / 0.0)
+    let inf_str = "Max: " + (1.0 / 0.0)
+    println(nan_str)  // 输出: Value: NaN
+    println(inf_str)  // 输出: Max: Infinity
+}
 ```
 
 ### 5.2 打印函数
@@ -281,6 +357,42 @@ func test_printf() {
 
     printf("Hex: 0x%x, Octal: %o\n", 255, 64)
     // 输出: Hex: 0xff, Octal: 100
+}
+
+// 边界情况：printf 特殊格式
+func test_printf_edge_cases() {
+    // 孤立的 %
+    printf("100%%\n")  // 输出: 100%
+
+    // 末尾孤立 %
+    printf("test%\n")  // 输出: test%
+
+    // 空字符串
+    printf("")  // 无输出
+
+    // 宽度与精度边界
+    printf("%5d\n", 42)    // 输出: "   42"
+    printf("%-5dend\n", 42) // 输出: "42   end"
+    printf("%.0f\n", 3.9)  // 输出: "4" (四舍五入)
+}
+```
+
+### 5.3 编译期错误测试
+
+```xin
+// 错误：printf 参数数量不匹配
+func test_printf_arg_count_error() {
+    printf("%d %s\n", 42)  // 编译错误: expected 2 arguments, found 1
+}
+
+// 错误：printf 类型不匹配
+func test_printf_type_error() {
+    printf("%d\n", "hello")  // 编译错误: expected 'int' for '%d', found 'string'
+}
+
+// 错误：未知占位符
+func test_printf_unknown_placeholder() {
+    printf("%z\n", 42)  // 编译错误: unknown format specifier '%z'
 }
 ```
 
