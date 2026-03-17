@@ -401,9 +401,9 @@ impl AOTCodeGenerator {
                     *fr
                 } else {
                     let func_id = *self.extern_func_ids.get(func_name)
-                        .expect("String concat function should be declared");
+                        .ok_or_else(|| format!("Function '{}' not declared", func_name))?;
                     let sig = self.func_sigs.get(func_name)
-                        .expect("Signature should exist")
+                        .ok_or_else(|| format!("Signature not found for function '{}'", func_name))?
                         .clone();
                     let sig_ref = builder.func.import_signature(sig);
                     let user_func_name = builder.func.declare_imported_user_function(UserExternalName {
@@ -430,9 +430,9 @@ impl AOTCodeGenerator {
                     *fr
                 } else {
                     let func_id = *self.extern_func_ids.get("xin_str_free")
-                        .expect("xin_str_free should be declared");
+                        .ok_or_else(|| "Function 'xin_str_free' not declared".to_string())?;
                     let sig = self.func_sigs.get("xin_str_free")
-                        .expect("Signature should exist")
+                        .ok_or_else(|| "Signature not found for function 'xin_str_free'".to_string())?
                         .clone();
                     let sig_ref = builder.func.import_signature(sig);
                     let user_func_name = builder.func.declare_imported_user_function(UserExternalName {
