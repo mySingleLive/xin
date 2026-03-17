@@ -71,25 +71,34 @@ help: strings can be concatenated with '+', or use explicit conversion
 
 ### 2.5 内存管理
 
-拼接产生的新字符串在堆上分配。
+拼接产生的新字符串在堆上分配，由编译期 GC 系统自动管理生命周期。
 
-**MVP 阶段策略**:
-- 运行时维护一个全局字符串分配列表
-- 每次拼接时，新字符串添加到列表中
-- 程序退出时，`xin_runtime_cleanup()` 函数释放所有分配的字符串
+**编译期内存回收**:
+- 编译器追踪每个字符串变量的作用域
+- 当引用字符串的变量超出生命周期范围（函数结束、代码块结束）时，编译器自动插入释放代码
+- 无需运行时 GC，无手动内存管理
+
+**代码生成示例**:
+```c
+// Xin 源码
+func example() {
+    let s = "Hello" + " World"
+    println(s)
+}  // s 在此处自动释放
+
+// 生成的 C 代码
+void example() {
+    char* s = xin_str_concat_ss("Hello", " World");
+    xin_println_str(s);
+    xin_str_free(s);  // 编译器自动插入
+}
+```
 
 **运行时函数**:
 ```c
-// 初始化运行时（程序启动时调用）
-void xin_runtime_init(void);
-
-// 清理所有分配的字符串（程序退出时调用）
-void xin_runtime_cleanup(void);
+// 释放字符串内存
+void xin_str_free(char* s);
 ```
-
-**未来扩展**:
-- 集成到编译期 GC 系统
-- 实现引用计数或作用域追踪
 
 ## 3. 内置打印函数
 
@@ -244,10 +253,10 @@ error: printf argument type mismatch
 | 文件 | 状态 | 修改内容 |
 |-----|------|---------|
 | `crates/xin-semantic/src/type_check.rs` | 修改 | 字符串 `+` 类型检查；`printf` 类型检查 |
-| `crates/xin-ir/src/ir.rs` | 修改 | 添加字符串拼接 IR 指令 |
-| `crates/xin-ir/src/builder.rs` | 修改 | 字符串拼接 IR 生成 |
-| `crates/xin-codegen/src/aot.rs` | 修改 | 字符串拼接代码生成 |
-| `runtime/runtime.c` | 修改 | 字符串拼接运行时函数；`printf` 实现 |
+| `crates/xin-ir/src/ir.rs` | 修改 | 添加字符串拼接 IR 指令；添加字符串释放 IR 指令 |
+| `crates/xin-ir/src/builder.rs` | 修改 | 字符串拼接 IR 生成；作用域结束时的释放代码生成 |
+| `crates/xin-codegen/src/aot.rs` | 修改 | 字符串拼接代码生成；字符串释放代码生成 |
+| `runtime/runtime.c` | 修改 | 字符串拼接运行时函数；字符串释放函数；`printf` 实现 |
 
 ### 4.2 IR 扩展
 
@@ -263,6 +272,11 @@ StringConcat {
     right_type: ConcatType,
 }
 
+/// String deallocation (called at end of variable scope)
+StringFree {
+    value: Value,
+}
+
 enum ConcatType {
     String,
     Int,
@@ -270,6 +284,10 @@ enum ConcatType {
     Bool,
 }
 ```
+
+**作用域追踪**:
+- IR Builder 追踪每个字符串变量的声明位置和作用域
+- 当离开作用域时，自动为该作用域内的字符串变量生成 `StringFree` 指令
 
 ### 4.3 运行时函数签名
 
@@ -282,6 +300,9 @@ char* xin_str_concat_sf(const char* a, double b);
 char* xin_str_concat_fs(double a, const char* b);
 char* xin_str_concat_sb(const char* a, int b);
 char* xin_str_concat_bs(int a, const char* b);
+
+// String deallocation
+void xin_str_free(char* s);
 
 // Print functions (existing)
 void xin_print_int(long long n);
@@ -395,34 +416,3 @@ func test_printf_unknown_placeholder() {
     printf("%z\n", 42)  // 编译错误: unknown format specifier '%z'
 }
 ```
-
-## 6. 未来扩展
-
-### 6.1 字符串插值
-
-考虑在未来支持字符串插值语法：
-
-```xin
-let name = "Alice"
-let age = 30
-println("$name is $age years old")
-// 输出: Alice is 30 years old
-```
-
-### 6.2 更多格式化选项
-
-- `%e` - 科学计数法
-- `%p` - 指针地址
-- 自定义格式化函数
-
-## 7. 风险与限制
-
-### 7.1 内存安全
-
-- 当前设计中，字符串拼接产生的新字符串需要手动管理内存
-- MVP 阶段采用简单策略，未来需要集成到编译期 GC 系统
-
-### 7.2 性能
-
-- 多次拼接会产生多个临时字符串
-- 未来可考虑字符串构建器优化
