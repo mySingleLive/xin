@@ -78,6 +78,56 @@ help: strings can be concatenated with '+', or use explicit conversion
 - 当引用字符串的变量超出生命周期范围（函数结束、代码块结束）时，编译器自动插入释放代码
 - 无需运行时 GC，无手动内存管理
 
+**中间字符串处理**:
+链式拼接 `"A" + "B" + "C"` 会产生临时字符串，处理策略如下：
+- 表达式求值过程中产生的临时字符串，绑定到匿名临时变量
+- 临时变量的生命周期为当前完整表达式结束
+- 表达式求值完成后，立即释放临时字符串
+
+```c
+// Xin: let s = "A" + "B" + "C"
+// 编译器生成:
+char* __temp1 = xin_str_concat_ss("A", "B");  // 临时 "AB"
+char* s = xin_str_concat_ss(__temp1, "C");     // 最终 "ABC"
+xin_str_free(__temp1);                          // 立即释放临时
+// ... 使用 s ...
+xin_str_free(s);                                // 作用域结束时释放 s
+```
+
+**控制流路径的释放**:
+编译器在每个控制流退出点插入释放代码：
+
+| 控制流类型 | 释放点 |
+|-----------|--------|
+| 函数正常返回 | return 语句之前 |
+| 函数结尾 | 函数体的最后一条语句之后 |
+| 代码块结束 | 代码块的最后一条语句之后 |
+| `break`/`continue` | 跳转语句之前 |
+
+```c
+// Xin 源码
+func example(x: int) {
+    let s = "value"
+    if x > 0 {
+        return s
+    }
+    println(s)
+}
+
+// 生成的 C 代码
+void example(long long x) {
+    char* s = "value";
+    if (x > 0) {
+        // return 前不需要释放 s，因为 s 被返回使用
+        // 注：如果 s 是动态分配的，需要考虑所有权转移
+        xin_print_str(s);
+        return;
+    }
+    xin_println_str(s);
+    xin_str_free(s);  // 函数结尾释放
+}
+```
+
 **代码生成示例**:
 ```c
 // Xin 源码
@@ -89,7 +139,8 @@ func example() {
 // 生成的 C 代码
 void example() {
     char* s = xin_str_concat_ss("Hello", " World");
-    xin_println_str(s);
+    xin_print_str(s);
+    xin_println();
     xin_str_free(s);  // 编译器自动插入
 }
 ```
@@ -100,6 +151,9 @@ void example() {
 void xin_str_free(char* s);
 ```
 
+**错误处理**:
+- 运行时内存分配失败（OOM）将导致程序终止，输出错误信息并退出
+
 ## 3. 内置打印函数
 
 ### 3.1 println 函数
@@ -108,8 +162,7 @@ void xin_str_free(char* s);
 
 **行为**:
 - 接受任意类型的单个参数
-- 根据参数类型调用对应的打印函数
-- 打印后输出换行符
+- 根据参数类型调用对应的打印函数，然后输出换行符
 - 返回 `void`
 
 **示例**:
@@ -122,11 +175,11 @@ println(true)         // 输出: true\n
 
 **实现策略**:
 - 语义分析阶段识别 `println` 调用
-- IR 生成阶段根据参数类型选择运行时函数：
-  - `int` → `xin_println_int`
-  - `float` → `xin_println_float`
-  - `string` → `xin_println_str`
-  - `bool` → `xin_println_bool`
+- IR 生成阶段根据参数类型生成代码：
+  - `int` → `xin_print_int(value)` + `xin_println()`
+  - `float` → `xin_print_float(value)` + `xin_println()`
+  - `string` → `xin_print_str(value)` + `xin_println()`
+  - `bool` → `xin_print_bool(value)` + `xin_println()`
 
 ### 3.2 print 函数
 
@@ -201,8 +254,10 @@ printf("Hex: 0x%X\n", 255)
 - 空指针字符串 → 输出 `(null)`
 
 **实现策略**:
+- `%d`, `%f`, `%s`, `%c`, `%x`, `%X`, `%o` 等标准占位符：直接调用 C 的 `vprintf`
+- `%b`（布尔值）占位符：运行时自定义处理，将 `true` 输出为 `"true"`，`false` 输出为 `"false"`
 - IR 生成阶段传递格式字符串指针和参数列表
-- 运行时直接调用 C 的 `vprintf`
+- 运行时函数 `xin_printf` 处理 `%b` 后调用 `vprintf` 处理剩余占位符
 
 ### 3.4 类型检查
 
@@ -285,9 +340,25 @@ enum ConcatType {
 }
 ```
 
-**作用域追踪**:
+**作用域追踪与释放代码生成**:
 - IR Builder 追踪每个字符串变量的声明位置和作用域
+- 使用栈式作用域管理，记录当前作用域内所有需要释放的字符串变量
 - 当离开作用域时，自动为该作用域内的字符串变量生成 `StringFree` 指令
+
+**控制流处理**:
+- **return 语句**: 在 return 之前，释放当前函数内所有作用域的字符串变量（按内到外顺序）
+- **break/continue**: 在跳转之前，释放当前循环体内的字符串变量
+- **if/else 分支**: 每个分支结束时释放该分支作用域内的字符串变量
+
+**释放代码插入位置**:
+```
+function/block structure
+├── 作用域开始 → 压入新的作用域帧
+├── 变量声明 → 记录字符串变量到当前作用域
+├── return → 先释放所有作用域的字符串，再返回
+├── break/continue → 先释放当前循环作用域的字符串，再跳转
+├── 作用域结束 → 释放当前作用域的字符串，弹出作用域帧
+```
 
 ### 4.3 运行时函数签名
 
