@@ -67,6 +67,17 @@ impl TypeChecker {
             scope_level: 0,
         };
         self.scopes.define("print", print_symbol);
+
+        // printf: accepts format string and variable args, returns void
+        let printf_symbol = Symbol {
+            name: "printf".to_string(),
+            kind: SymbolKind::Function {
+                params: vec![("format".to_string(), Type::String, false)],
+                return_type: Type::Void,
+            },
+            scope_level: 0,
+        };
+        self.scopes.define("printf", printf_symbol);
     }
 
     fn collect_declaration(&mut self, decl: &Decl) {
@@ -502,6 +513,50 @@ impl TypeChecker {
                         }
                         self.check_expr(&args[0])?;
                         return Ok(Type::Void);
+                    }
+
+                    // Handle printf with format string validation
+                    if name == "printf" {
+                        if args.is_empty() {
+                            return Err(SemanticError::WrongNumberOfArguments {
+                                expected: 1,
+                                found: 0,
+                            });
+                        }
+                        // Check first argument is a string literal
+                        if let ExprKind::StringLiteral(format_str) = &args[0].kind {
+                            let expected_types = self.parse_printf_format(format_str)?;
+                            if args.len() - 1 != expected_types.len() {
+                                return Err(SemanticError::PrintfArgumentCountMismatch {
+                                    expected: expected_types.len(),
+                                    found: args.len() - 1,
+                                });
+                            }
+                            for (arg, expected_type) in args[1..].iter().zip(expected_types.iter()) {
+                                let arg_type = self.check_expr(arg)?;
+                                if !self.types_compatible(expected_type, &arg_type) {
+                                    return Err(SemanticError::PrintfArgumentTypeMismatch {
+                                        expected: expected_type.clone(),
+                                        found: arg_type,
+                                    });
+                                }
+                            }
+                            return Ok(Type::Void);
+                        } else {
+                            // Non-literal format string, check it's a string type
+                            let format_type = self.check_expr(&args[0])?;
+                            if format_type != Type::String {
+                                return Err(SemanticError::TypeMismatch {
+                                    expected: Type::String,
+                                    found: format_type,
+                                });
+                            }
+                            // Can't validate format at compile time, just check remaining args
+                            for arg in &args[1..] {
+                                self.check_expr(arg)?;
+                            }
+                            return Ok(Type::Void);
+                        }
                     }
 
                     // Clone the function info if found
@@ -947,6 +1002,54 @@ impl TypeChecker {
             }
             _ => false,
         }
+    }
+
+    /// Parse printf format string and return expected types
+    fn parse_printf_format(&self, format: &str) -> Result<Vec<Type>, SemanticError> {
+        let mut types = Vec::new();
+        let chars: Vec<char> = format.chars().collect();
+        let mut i = 0;
+
+        while i < chars.len() {
+            if chars[i] == '%' {
+                i += 1;
+                if i >= chars.len() {
+                    // Trailing % - not an error, just output %
+                    break;
+                }
+
+                // Skip width/precision modifiers
+                while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.' || chars[i] == '-') {
+                    i += 1;
+                }
+
+                if i >= chars.len() {
+                    break;
+                }
+
+                match chars[i] {
+                    '%' => {} // Escaped %, no argument
+                    'd' | 'i' | 'x' | 'X' | 'o' | 'c' | 'l' => {
+                        types.push(Type::Int);
+                    }
+                    'f' => {
+                        types.push(Type::Float);
+                    }
+                    's' => {
+                        types.push(Type::String);
+                    }
+                    'b' => {
+                        types.push(Type::Bool);
+                    }
+                    unknown => {
+                        return Err(SemanticError::InvalidFormatSpecifier(unknown));
+                    }
+                }
+            }
+            i += 1;
+        }
+
+        Ok(types)
     }
 }
 

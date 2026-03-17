@@ -38,6 +38,15 @@ pub enum SemanticError {
 
     #[error("Invalid assignment target")]
     InvalidAssignmentTarget,
+
+    #[error("unknown format specifier '%{0}'")]
+    InvalidFormatSpecifier(char),
+
+    #[error("printf argument count mismatch: expected {expected}, found {found}")]
+    PrintfArgumentCountMismatch { expected: usize, found: usize },
+
+    #[error("printf argument type mismatch: expected '{expected:?}', found '{found:?}'")]
+    PrintfArgumentTypeMismatch { expected: Type, found: Type },
 }
 
 impl From<SemanticError> for Diagnostic {
@@ -54,6 +63,9 @@ impl From<SemanticError> for Diagnostic {
             SemanticError::UseAfterMove(_) => DiagnosticCode::O001,
             SemanticError::MissingMoveKeyword => DiagnosticCode::O002,
             SemanticError::InvalidAssignmentTarget => DiagnosticCode::S001,
+            SemanticError::InvalidFormatSpecifier(_) => DiagnosticCode::S002,
+            SemanticError::PrintfArgumentCountMismatch { .. } => DiagnosticCode::S002,
+            SemanticError::PrintfArgumentTypeMismatch { .. } => DiagnosticCode::S002,
         };
         Diagnostic::error(code, err.to_string())
     }
