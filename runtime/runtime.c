@@ -186,3 +186,41 @@ void xin_printf(const char* format, ...) {
 
     va_end(args);
 }
+
+// Printf wrapper functions for different argument counts
+// These are needed because Cranelift doesn't support variadic functions directly
+
+// 1 argument (format string only)
+void xin_printf_1(const char* fmt) {
+    xin_printf(fmt);
+}
+
+// 2 arguments with different types
+void xin_printf_2_i(const char* fmt, long long a1) {
+    xin_printf(fmt, a1);
+}
+
+void xin_printf_2_f(const char* fmt, double a1) {
+    xin_printf(fmt, a1);
+}
+
+void xin_printf_2_s(const char* fmt, const char* a1) {
+    xin_printf(fmt, a1);
+}
+
+// 3 arguments
+void xin_printf_3_ii(const char* fmt, long long a1, long long a2) {
+    xin_printf(fmt, a1, a2);
+}
+
+void xin_printf_3_si(const char* fmt, const char* a1, long long a2) {
+    xin_printf(fmt, a1, a2);
+}
+
+void xin_printf_3_sf(const char* fmt, const char* a1, double a2) {
+    xin_printf(fmt, a1, a2);
+}
+
+void xin_printf_3_ss(const char* fmt, const char* a1, const char* a2) {
+    xin_printf(fmt, a1, a2);
+}

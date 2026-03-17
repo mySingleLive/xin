@@ -682,8 +682,9 @@ impl IRBuilder {
         // Build all arguments and collect their types
         let mut arg_vals: Vec<Value> = Vec::new();
         let mut param_types: Vec<IRType> = Vec::new();
+        let mut type_suffix = String::new();
 
-        for arg in args {
+        for (i, arg) in args.iter().enumerate() {
             if let Some(val) = self.build_expr(arg) {
                 arg_vals.push(val);
                 let arg_type = self.get_expr_type_with_vars(arg);
@@ -694,20 +695,40 @@ impl IRBuilder {
                     Some(Type::String) => IRType::Ptr("char".to_string()),
                     _ => IRType::I64,
                 };
-                param_types.push(ir_type);
+                param_types.push(ir_type.clone());
+
+                // Build type suffix for function name (skip first arg which is format string)
+                if i > 0 {
+                    type_suffix.push('_');
+                    type_suffix.push_str(match ir_type {
+                        IRType::I64 => "i",
+                        IRType::F64 => "f",
+                        IRType::Bool => "i", // bool is passed as int
+                        IRType::Ptr(_) => "s",
+                        _ => "i",
+                    });
+                }
             }
         }
 
-        // Call xin_printf
+        // Generate a unique function name based on argument count and types
+        // Format: xin_printf_N or xin_printf_N_type1_type2...
+        let func_name = if type_suffix.is_empty() {
+            format!("xin_printf_{}", param_types.len())
+        } else {
+            format!("xin_printf_{}{}", param_types.len(), type_suffix)
+        };
+
+        // Call the specific printf wrapper
         self.emit(Instruction::Call {
             result: None,
-            func: "xin_printf".to_string(),
+            func: func_name.clone(),
             args: arg_vals,
             is_extern: true,
         });
 
         // Declare external function with all parameter types
-        self.declare_extern_if_needed("xin_printf", param_types, None);
+        self.declare_extern_if_needed(&func_name, param_types, None);
 
         None
     }

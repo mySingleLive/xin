@@ -22,6 +22,10 @@ func main() {
     let s5 = "Flag: " + true
     println(s5)
 
-    // Note: printf with variadic arguments requires special handling
-    // which is not yet fully implemented
+    // printf tests
+    printf("Integer: %d\n", 42)
+    printf("Float: %f\n", 3.14)
+    printf("String: %s\n", "test")
+    printf("Bool: %b\n", true)
+    printf("Hex: 0x%x\n", 255)
 }

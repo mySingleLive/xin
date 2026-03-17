@@ -366,10 +366,42 @@ impl AOTCodeGenerator {
                     fr
                 };
 
-                // Load arguments
+                // Load arguments and convert types if needed
+                let sig = self.func_sigs.get(func_name)
+                    .ok_or_else(|| format!("Signature not found for function {}", func_name))?;
+
                 let arg_vals: Vec<Value> = args
                     .iter()
-                    .map(|a| self.load_variable(builder, a, variables))
+                    .enumerate()
+                    .map(|(i, a)| -> Result<Value, String> {
+                        let val = self.load_variable(builder, a, variables)?;
+                        // Convert argument type to match function signature
+                        let expected_type = sig.params.get(i)
+                            .map(|p| p.value_type)
+                            .unwrap_or(types::I64);
+                        let val_type = builder.func.dfg.value_type(val);
+
+                        if val_type != expected_type {
+                            // Need type conversion
+                            match (val_type, expected_type) {
+                                (types::I8, types::I64) => {
+                                    // Extend bool to i64
+                                    Ok(builder.ins().uextend(types::I64, val))
+                                }
+                                (types::I64, types::F64) => {
+                                    // Convert int to float
+                                    Ok(builder.ins().fcvt_from_sint(types::F64, val))
+                                }
+                                (types::F64, types::I64) => {
+                                    // Convert float to int
+                                    Ok(builder.ins().fcvt_to_sint_sat(types::I64, val))
+                                }
+                                _ => Ok(val), // No conversion
+                            }
+                        } else {
+                            Ok(val)
+                        }
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
 
                 // Make the call
