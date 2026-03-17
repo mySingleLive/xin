@@ -4,6 +4,8 @@
 //! without manual memory management or runtime GC.
 
 pub mod compiler;
+pub mod linker;
+pub mod runtime;
 
 pub use xin_ast as ast;
 pub use xin_lexer as lexer;

@@ -1,0 +1,4 @@
+// test_int.xin
+func main() {
+    println(42)
+}

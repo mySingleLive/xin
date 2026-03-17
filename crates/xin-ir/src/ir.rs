@@ -36,6 +36,14 @@ impl fmt::Display for IRType {
     }
 }
 
+/// External function declaration
+#[derive(Debug, Clone)]
+pub struct ExternFunction {
+    pub name: String,
+    pub params: Vec<IRType>,
+    pub return_type: Option<IRType>,
+}
+
 /// IR Instructions
 #[derive(Debug, Clone)]
 pub enum Instruction {
@@ -51,6 +59,9 @@ pub enum Instruction {
     /// Constant: %result = const value
     Const { result: Value, value: String, ty: IRType },
 
+    /// String constant: %result = string_const string_index
+    StringConst { result: Value, string_index: usize },
+
     /// Binary operation: %result = op left, right
     Binary {
         result: Value,
@@ -64,6 +75,7 @@ pub enum Instruction {
         result: Option<Value>,
         func: String,
         args: Vec<Value>,
+        is_extern: bool,
     },
 
     /// Return: ret value
@@ -120,15 +132,37 @@ pub struct IRFunction {
 #[derive(Debug, Clone)]
 pub struct IRModule {
     pub functions: Vec<IRFunction>,
+    pub extern_functions: Vec<ExternFunction>,
+    pub strings: Vec<String>,
 }
 
 impl IRModule {
     pub fn new() -> Self {
-        Self { functions: Vec::new() }
+        Self {
+            functions: Vec::new(),
+            extern_functions: Vec::new(),
+            strings: Vec::new(),
+        }
     }
 
     pub fn add_function(&mut self, func: IRFunction) {
         self.functions.push(func);
+    }
+
+    pub fn add_extern_function(&mut self, func: ExternFunction) {
+        self.extern_functions.push(func);
+    }
+
+    pub fn add_string(&mut self, s: &str) -> usize {
+        // Check if string already exists
+        for (i, existing) in self.strings.iter().enumerate() {
+            if existing == s {
+                return i;
+            }
+        }
+        let index = self.strings.len();
+        self.strings.push(s.to_string());
+        index
     }
 }
 

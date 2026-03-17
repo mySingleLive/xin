@@ -67,6 +67,12 @@ impl Lexer {
     }
 
     fn next_token(&mut self) -> Result<Token, LexerError> {
+        // Skip whitespace before processing
+        self.skip_whitespace();
+        if self.is_at_end() {
+            return Ok(Token::eof(self.line, self.column));
+        }
+
         let start_line = self.line;
         let start_col = self.column;
         let ch = self.advance();

@@ -1,0 +1,4 @@
+// hello.xin
+func main() {
+    println("Hello, World!")
+}

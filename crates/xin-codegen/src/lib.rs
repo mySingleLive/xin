@@ -1,3 +1,7 @@
 //! Code generation for Xin
 
-// Placeholder - will be implemented in Task 8
+mod aot;
+mod cranelift;
+
+pub use aot::AOTCodeGenerator;
+pub use cranelift::CodeGenerator;

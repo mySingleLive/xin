@@ -2,7 +2,7 @@
 
 use xin_ast::{BinOp as AstBinOp, Decl, DeclKind, Expr, ExprKind, FuncDecl, SourceFile, Stmt, StmtKind, Type};
 
-use crate::{BinOp, Instruction, IRFunction, IRModule, IRType, Value};
+use crate::{BinOp, ExternFunction, Instruction, IRFunction, IRModule, IRType, Value};
 
 /// IR Builder
 pub struct IRBuilder {
@@ -252,11 +252,12 @@ impl IRBuilder {
                 Some(result)
             }
             ExprKind::StringLiteral(s) => {
+                // Add string to module's string table and use StringConst
+                let string_index = self.module.add_string(s);
                 let result = self.new_temp();
-                self.emit(Instruction::Const {
+                self.emit(Instruction::StringConst {
                     result: result.clone(),
-                    value: format!("\"{}\"", s),
-                    ty: IRType::String,
+                    string_index,
                 });
                 Some(result)
             }
@@ -328,15 +329,23 @@ impl IRBuilder {
                 Some(result)
             }
             ExprKind::Call { callee, args } => {
-                let arg_vals: Vec<Value> = args.iter().filter_map(|a| self.build_expr(a)).collect();
-
                 match &callee.kind {
                     ExprKind::Ident(name) => {
+                        // Handle println/print specially
+                        if name == "println" {
+                            return self.handle_println(args);
+                        } else if name == "print" {
+                            return self.handle_print(args);
+                        }
+
+                        // Regular function call
+                        let arg_vals: Vec<Value> = args.iter().filter_map(|a| self.build_expr(a)).collect();
                         let result = self.new_temp();
                         self.emit(Instruction::Call {
                             result: Some(result.clone()),
                             func: name.clone(),
                             args: arg_vals,
+                            is_extern: false,
                         });
                         Some(result)
                     }
@@ -353,6 +362,7 @@ impl IRBuilder {
                     result: Some(result.clone()),
                     func: method.clone(),
                     args: arg_vals,
+                    is_extern: false,
                 });
                 Some(result)
             }
@@ -453,6 +463,193 @@ impl IRBuilder {
     fn emit(&mut self, instr: Instruction) {
         if let Some(f) = &mut self.current_function {
             f.instructions.push(instr);
+        }
+    }
+
+    /// Handle println(expr) - prints value followed by newline
+    fn handle_println(&mut self, args: &[Expr]) -> Option<Value> {
+        if args.is_empty() {
+            // println() with no args - just print newline
+            self.emit(Instruction::Call {
+                result: None,
+                func: "xin_println".to_string(),
+                args: vec![],
+                is_extern: true,
+            });
+            // Declare external function if not already declared
+            self.declare_extern_if_needed("xin_println", vec![], None);
+            return None;
+        }
+
+        let arg = &args[0];
+        let arg_val = self.build_expr(arg)?;
+        let arg_type = Self::get_expr_type(arg);
+
+        match arg_type {
+            Some(Type::Int) => {
+                self.emit(Instruction::Call {
+                    result: None,
+                    func: "xin_print_int".to_string(),
+                    args: vec![arg_val],
+                    is_extern: true,
+                });
+                self.emit(Instruction::Call {
+                    result: None,
+                    func: "xin_println".to_string(),
+                    args: vec![],
+                    is_extern: true,
+                });
+                self.declare_extern_if_needed("xin_print_int", vec![IRType::I64], None);
+                self.declare_extern_if_needed("xin_println", vec![], None);
+            }
+            Some(Type::Float) => {
+                self.emit(Instruction::Call {
+                    result: None,
+                    func: "xin_print_float".to_string(),
+                    args: vec![arg_val],
+                    is_extern: true,
+                });
+                self.emit(Instruction::Call {
+                    result: None,
+                    func: "xin_println".to_string(),
+                    args: vec![],
+                    is_extern: true,
+                });
+                self.declare_extern_if_needed("xin_print_float", vec![IRType::F64], None);
+                self.declare_extern_if_needed("xin_println", vec![], None);
+            }
+            Some(Type::Bool) => {
+                self.emit(Instruction::Call {
+                    result: None,
+                    func: "xin_print_bool".to_string(),
+                    args: vec![arg_val],
+                    is_extern: true,
+                });
+                self.emit(Instruction::Call {
+                    result: None,
+                    func: "xin_println".to_string(),
+                    args: vec![],
+                    is_extern: true,
+                });
+                self.declare_extern_if_needed("xin_print_bool", vec![IRType::Bool], None);
+                self.declare_extern_if_needed("xin_println", vec![], None);
+            }
+            Some(Type::String) => {
+                self.emit(Instruction::Call {
+                    result: None,
+                    func: "xin_print_str".to_string(),
+                    args: vec![arg_val],
+                    is_extern: true,
+                });
+                self.emit(Instruction::Call {
+                    result: None,
+                    func: "xin_println".to_string(),
+                    args: vec![],
+                    is_extern: true,
+                });
+                self.declare_extern_if_needed("xin_print_str", vec![IRType::Ptr("char".to_string())], None);
+                self.declare_extern_if_needed("xin_println", vec![], None);
+            }
+            _ => {
+                // Default to int
+                self.emit(Instruction::Call {
+                    result: None,
+                    func: "xin_print_int".to_string(),
+                    args: vec![arg_val],
+                    is_extern: true,
+                });
+                self.emit(Instruction::Call {
+                    result: None,
+                    func: "xin_println".to_string(),
+                    args: vec![],
+                    is_extern: true,
+                });
+            }
+        }
+        None
+    }
+
+    /// Handle print(expr) - prints value without newline
+    fn handle_print(&mut self, args: &[Expr]) -> Option<Value> {
+        if args.is_empty() {
+            return None;
+        }
+
+        let arg = &args[0];
+        let arg_val = self.build_expr(arg)?;
+        let arg_type = Self::get_expr_type(arg);
+
+        match arg_type {
+            Some(Type::Int) => {
+                self.emit(Instruction::Call {
+                    result: None,
+                    func: "xin_print_int".to_string(),
+                    args: vec![arg_val],
+                    is_extern: true,
+                });
+                self.declare_extern_if_needed("xin_print_int", vec![IRType::I64], None);
+            }
+            Some(Type::Float) => {
+                self.emit(Instruction::Call {
+                    result: None,
+                    func: "xin_print_float".to_string(),
+                    args: vec![arg_val],
+                    is_extern: true,
+                });
+                self.declare_extern_if_needed("xin_print_float", vec![IRType::F64], None);
+            }
+            Some(Type::Bool) => {
+                self.emit(Instruction::Call {
+                    result: None,
+                    func: "xin_print_bool".to_string(),
+                    args: vec![arg_val],
+                    is_extern: true,
+                });
+                self.declare_extern_if_needed("xin_print_bool", vec![IRType::Bool], None);
+            }
+            Some(Type::String) => {
+                self.emit(Instruction::Call {
+                    result: None,
+                    func: "xin_print_str".to_string(),
+                    args: vec![arg_val],
+                    is_extern: true,
+                });
+                self.declare_extern_if_needed("xin_print_str", vec![IRType::Ptr("char".to_string())], None);
+            }
+            _ => {
+                self.emit(Instruction::Call {
+                    result: None,
+                    func: "xin_print_int".to_string(),
+                    args: vec![arg_val],
+                    is_extern: true,
+                });
+            }
+        }
+        None
+    }
+
+    /// Declare an external function if not already declared
+    fn declare_extern_if_needed(&mut self, name: &str, params: Vec<IRType>, return_type: Option<IRType>) {
+        // Check if already declared
+        if self.module.extern_functions.iter().any(|f| f.name == name) {
+            return;
+        }
+        self.module.add_extern_function(ExternFunction {
+            name: name.to_string(),
+            params,
+            return_type,
+        });
+    }
+
+    /// Get the type of an expression (simplified)
+    fn get_expr_type(expr: &Expr) -> Option<Type> {
+        match &expr.kind {
+            ExprKind::IntLiteral(_) => Some(Type::Int),
+            ExprKind::FloatLiteral(_) => Some(Type::Float),
+            ExprKind::BoolLiteral(_) => Some(Type::Bool),
+            ExprKind::StringLiteral(_) => Some(Type::String),
+            ExprKind::Ident(_) => None, // Would need symbol table
+            _ => None,
         }
     }
 }

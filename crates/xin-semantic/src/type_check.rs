@@ -22,6 +22,9 @@ impl TypeChecker {
     }
 
     pub fn check(&mut self, file: &SourceFile) -> Result<(), Vec<Diagnostic>> {
+        // Register built-in functions
+        self.register_builtins();
+
         // First pass: collect all top-level declarations
         for decl in &file.declarations {
             self.collect_declaration(decl);
@@ -39,6 +42,31 @@ impl TypeChecker {
         } else {
             Err(self.diagnostics.clone())
         }
+    }
+
+    /// Register built-in functions like println, print
+    fn register_builtins(&mut self) {
+        // println: accepts any type and returns void
+        let println_symbol = Symbol {
+            name: "println".to_string(),
+            kind: SymbolKind::Function {
+                params: vec![("_".to_string(), Type::String, false)], // Accept one argument of any type
+                return_type: Type::Void,
+            },
+            scope_level: 0,
+        };
+        self.scopes.define("println", println_symbol);
+
+        // print: accepts any type and returns void
+        let print_symbol = Symbol {
+            name: "print".to_string(),
+            kind: SymbolKind::Function {
+                params: vec![("_".to_string(), Type::String, false)],
+                return_type: Type::Void,
+            },
+            scope_level: 0,
+        };
+        self.scopes.define("print", print_symbol);
     }
 
     fn collect_declaration(&mut self, decl: &Decl) {
@@ -435,6 +463,19 @@ impl TypeChecker {
             ExprKind::Call { callee, args } => {
                 // Check if callee is a function name
                 if let ExprKind::Ident(name) = &callee.kind {
+                    // Check for built-in functions that accept any type
+                    if name == "println" || name == "print" {
+                        // These accept any single argument
+                        if args.len() != 1 {
+                            return Err(SemanticError::WrongNumberOfArguments {
+                                expected: 1,
+                                found: args.len(),
+                            });
+                        }
+                        self.check_expr(&args[0])?;
+                        return Ok(Type::Void);
+                    }
+
                     // Clone the function info if found
                     let func_info = self.scopes.lookup(name).and_then(|symbol| {
                         if let SymbolKind::Function { params, return_type } = &symbol.kind {
