@@ -101,6 +101,49 @@ println(greeting)
 // greeting 作用域结束，自动释放
 ```
 
+**变量重新赋值**:
+- 当字符串变量被重新赋值时，先释放旧值再赋予新值
+- 字符串字面量赋值不需要释放（静态存储）
+
+```c
+// Xin 源码
+let s = "a" + "b"   // s = "ab"（堆分配）
+s = "c" + "d"       // 释放 "ab"，s = "cd"（堆分配）
+s = "literal"       // 释放 "cd"，s 指向静态字符串
+
+// 生成的 C 代码
+char* s = xin_str_concat_ss("a", "b");
+xin_str_free(s);
+s = xin_str_concat_ss("c", "d");
+xin_str_free(s);
+s = "literal";  // 静态字符串，不需要释放
+```
+
+**变量影子化（Shadowing）**:
+- 当内层作用域声明同名变量时，外层变量被隐藏
+- 外层变量在外层作用域结束时释放，内层变量在内层作用域结束时释放
+
+```c
+// Xin 源码
+let s = "outer" + "!"     // 外层 s
+{
+    let s = "inner" + "!"  // 内层 s（影子化）
+    println(s)             // 打印 "inner!"
+}  // 内层 s 释放
+println(s)               // 打印 "outer!"
+// 外层 s 释放
+
+// 生成的 C 代码
+char* s_outer = xin_str_concat_ss("outer", "!");
+{
+    char* s_inner = xin_str_concat_ss("inner", "!");
+    xin_print_str(s_inner); xin_println();
+    xin_str_free(s_inner);  // 内层 s 释放
+}
+xin_print_str(s_outer); xin_println();
+xin_str_free(s_outer);    // 外层 s 释放
+```
+
 **编译期内存回收**:
 - 编译器追踪每个堆分配字符串变量的作用域
 - 当引用字符串的变量超出生命周期范围（函数结束、代码块结束）时，编译器自动插入释放代码
@@ -346,6 +389,14 @@ error: printf argument type mismatch
    |
 3  |     printf("%d\n", "hello")
    |                    ^^^^^^^ expected 'int' for '%d', found 'string'
+```
+
+```
+error: unknown format specifier
+  --> file.xin:3:12
+   |
+3  |     printf("%z\n", 42)
+   |            ^^ unknown format specifier '%z'
 ```
 
 ## 4. 实现细节
