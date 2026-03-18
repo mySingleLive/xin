@@ -765,7 +765,10 @@ impl TypeChecker {
                     Type::Generic { name, args } if name == "List" && !args.is_empty() => {
                         Ok(args[0].clone())
                     }
-                    _ => Err(SemanticError::UndefinedType(format!("{:?}", obj_type))),
+                    _ => Err(SemanticError::NotIndexable {
+                        ty: obj_type,
+                        span: object.span,
+                    }),
                 }
             }
 
@@ -776,17 +779,17 @@ impl TypeChecker {
 
             ExprKind::ArrayLiteral(elements) => {
                 if elements.is_empty() {
-                    return Ok(Type::Array(Box::new(Type::Void)));
+                    // 空数组默认为 object[]
+                    return Ok(Type::Array(Box::new(Type::Object)));
                 }
 
                 let elem_type = self.check_expr(&elements[0])?;
                 for elem in &elements[1..] {
                     let t = self.check_expr(elem)?;
                     if !self.types_compatible(&elem_type, &t) {
-                        return Err(SemanticError::TypeMismatch {
-                            expected: elem_type.clone(),
-                            found: t,
-                        });
+                        // 混合类型 → object[]
+                        // 如果不是所有元素类型一致，返回 object[]
+                        return Ok(Type::Array(Box::new(Type::Object)));
                     }
                 }
 

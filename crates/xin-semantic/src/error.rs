@@ -50,6 +50,20 @@ pub enum SemanticError {
 
     #[error("cannot convert type '{ty}' to string")]
     CannotConvertToString { ty: Type, span: SourceSpan },
+
+    #[error("type '{ty}' is not indexable")]
+    NotIndexable { ty: Type, span: SourceSpan },
+
+    #[error("cannot modify immutable array with method '{method}'")]
+    ImmutableArrayModification { method: String, span: SourceSpan },
+
+    #[error("array element type mismatch at index {index}: expected '{expected}', found '{actual}'")]
+    ArrayElementTypeMismatch {
+        expected: Type,
+        actual: Type,
+        index: usize,
+        span: SourceSpan,
+    },
 }
 
 impl From<SemanticError> for Diagnostic {
@@ -70,6 +84,9 @@ impl From<SemanticError> for Diagnostic {
             SemanticError::PrintfArgumentCountMismatch { .. } => DiagnosticCode::S002,
             SemanticError::PrintfArgumentTypeMismatch { .. } => DiagnosticCode::S002,
             SemanticError::CannotConvertToString { .. } => DiagnosticCode::S002,
+            SemanticError::NotIndexable { .. } => DiagnosticCode::S002,
+            SemanticError::ImmutableArrayModification { .. } => DiagnosticCode::S003,
+            SemanticError::ArrayElementTypeMismatch { .. } => DiagnosticCode::S002,
         };
         Diagnostic::error(code, err.to_string())
     }
