@@ -249,3 +249,84 @@ void xin_printf_3_sf(const char* fmt, const char* a1, double a2) {
 void xin_printf_3_ss(const char* fmt, const char* a1, const char* a2) {
     xin_printf(fmt, a1, a2);
 }
+
+// ========== Array Runtime ==========
+
+#include <stdint.h>
+
+// 数组结构
+typedef struct {
+    void** data;        // 元素指针数组
+    int64_t length;      // 当前长度
+    int64_t capacity;    // 容量
+} xin_array;
+
+// 创建数组
+xin_array* xin_array_new(int64_t capacity) {
+    xin_array* arr = (xin_array*)malloc(sizeof(xin_array));
+    if (!arr) return NULL;
+
+    arr->data = (void**)calloc(capacity > 0 ? capacity : 4, sizeof(void*));
+    if (!arr->data && capacity > 0) {
+        free(arr);
+        return NULL;
+    }
+
+    arr->length = 0;
+    arr->capacity = capacity > 0 ? capacity : 4;
+    return arr;
+}
+
+// 获取元素（越界 panic）
+void* xin_array_get(xin_array* arr, int64_t index) {
+    if (index < 0 || index >= arr->length) {
+        fprintf(stderr, "ArrayIndexOutOfBoundsError: index %lld out of bounds for length %lld\n",
+                (long long)index, (long long)arr->length);
+        exit(1);
+    }
+    return arr->data[index];
+}
+
+// 设置元素（用于初始化，可设置 capacity 范围内的索引）
+void xin_array_set(xin_array* arr, int64_t index, void* value) {
+    if (index < 0 || index >= arr->capacity) {
+        fprintf(stderr, "ArrayIndexOutOfBoundsError: index %lld out of bounds for capacity %lld\n",
+                (long long)index, (long long)arr->capacity);
+        exit(1);
+    }
+    arr->data[index] = value;
+    // 更新长度以包含设置的索引
+    if (index >= arr->length) {
+        arr->length = index + 1;
+    }
+}
+
+// 追加元素
+void xin_array_push(xin_array* arr, void* value) {
+    if (arr->length >= arr->capacity) {
+        // 扩容
+        int64_t new_capacity = arr->capacity * 2;
+        void** new_data = (void**)realloc(arr->data, new_capacity * sizeof(void*));
+        if (!new_data) {
+            fprintf(stderr, "MemoryError: failed to expand array\n");
+            exit(1);
+        }
+        arr->data = new_data;
+        arr->capacity = new_capacity;
+    }
+    arr->data[arr->length++] = value;
+}
+
+// 弹出元素
+void* xin_array_pop(xin_array* arr) {
+    if (arr->length == 0) {
+        fprintf(stderr, "ArrayPopError: cannot pop from empty array\n");
+        exit(1);
+    }
+    return arr->data[--arr->length];
+}
+
+// 获取长度
+int64_t xin_array_len(xin_array* arr) {
+    return arr->length;
+}
