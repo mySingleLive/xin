@@ -1,0 +1,15 @@
+// Test template expressions
+
+func add(a: int, b: int) int {
+    return a + b
+}
+
+func main() {
+    let a = 10
+    let b = 20
+
+    println(`Sum: {a + b}`)
+    println(`Product: {a * b}`)
+    println(`Function: {add(5, 3)}`)
+    println(`Complex: {add(a, b) * 2}`)
+}

@@ -1,0 +1,9 @@
+// Test template escape sequences
+
+func main() {
+    println(`Backtick: \``)
+    println(`Brace: \{ \}`)
+    println(`Backslash: \\`)
+    println(`Newline:\nSecond line`)
+    println(`Tab:\there`)
+}

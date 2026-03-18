@@ -1,0 +1,15 @@
+// Test basic template strings
+
+func main() {
+    let name = "World"
+    println(`Hello, {name}!`)
+
+    let count = 42
+    println(`Count: {count}`)
+
+    let price = 19.99
+    println(`Price: {price}`)
+
+    let active = true
+    println(`Active: {active}`)
+}
