@@ -463,19 +463,19 @@ error: unterminated template string
   --> main.xin:3:15
    |
 3  |     let s = `hello
-   |               ^^^^^ unterminated template string
+   |             ^^^^^^ unterminated template string
 
 error: unclosed template expression
   --> main.xin:4:20
    |
 4  |     let s = `value = {1 + 2`
-   |                    ^^^^^^^^ expected `}` to close expression
+   |                      ^^^^^^ expected `}` to close expression
 
 error: cannot convert type `User` to string
   --> main.xin:5:25
    |
 5  |     let s = `user: {user}`
-   |                         ^ type `User` cannot be converted to string
+   |                     ^^^^ type `User` cannot be converted to string
    |
    = help: implement a `toString()` method for `User`
 ```
