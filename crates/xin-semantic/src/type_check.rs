@@ -1,7 +1,7 @@
 //! Type checking
 
 use xin_ast::*;
-use xin_diagnostics::{Diagnostic, SourceSpan};
+use xin_diagnostics::Diagnostic;
 
 use crate::{ScopeStack, SemanticError, Symbol, SymbolKind};
 
@@ -948,7 +948,7 @@ impl TypeChecker {
             }
 
             ExprKind::TemplateLiteral(parts) => {
-                self.check_template_literal(parts, &expr.span)
+                self.check_template_literal(parts)
             }
         }
     }
@@ -1008,14 +1008,14 @@ impl TypeChecker {
         }
     }
 
-    fn check_template_literal(&mut self, parts: &[TemplatePart], span: &SourceSpan) -> Result<Type, SemanticError> {
+    fn check_template_literal(&mut self, parts: &[TemplatePart]) -> Result<Type, SemanticError> {
         for part in parts {
             if let TemplatePart::Expr(expr) = part {
                 let ty = self.check_expr(expr)?;
                 if !self.is_stringifiable(&ty) {
                     return Err(SemanticError::CannotConvertToString {
                         ty,
-                        span: *span,
+                        span: expr.span,
                     });
                 }
             }
