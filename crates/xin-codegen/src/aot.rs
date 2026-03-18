@@ -591,6 +591,7 @@ impl AOTCodeGenerator {
                     IRType::String => 8, // pointer size
                     IRType::Ptr(_) => 8,
                     IRType::Void => 0,
+                    IRType::Object => 8, // pointer size for arrays
                 };
                 let slot = builder.create_sized_stack_slot(cranelift::codegen::ir::StackSlotData::new(
                     cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
@@ -774,6 +775,39 @@ impl AOTCodeGenerator {
                 let ret_val = builder.inst_results(call_val)[0];
                 self.store_variable(builder, result, ret_val, variables, var_counter, self.pointer_type);
             }
+            // Array instructions - stub implementations for Task 12
+            Instruction::ArrayNew { result, capacity: _ } => {
+                // TODO: Call xin_array_new runtime function
+                // For now, return a null pointer
+                let null_ptr = builder.ins().iconst(self.pointer_type, 0);
+                self.store_variable(builder, result, null_ptr, variables, var_counter, self.pointer_type);
+            }
+            Instruction::ArrayGet { result, array, index } => {
+                // TODO: Call xin_array_get runtime function
+                let _ = (array, index);
+                let null_val = builder.ins().iconst(self.pointer_type, 0);
+                self.store_variable(builder, result, null_val, variables, var_counter, self.pointer_type);
+            }
+            Instruction::ArraySet { array, index, value } => {
+                // TODO: Call xin_array_set runtime function
+                let _ = (array, index, value);
+            }
+            Instruction::ArrayPush { array, value } => {
+                // TODO: Call xin_array_push runtime function
+                let _ = (array, value);
+            }
+            Instruction::ArrayPop { result, array } => {
+                // TODO: Call xin_array_pop runtime function
+                let _ = array;
+                let null_val = builder.ins().iconst(self.pointer_type, 0);
+                self.store_variable(builder, result, null_val, variables, var_counter, self.pointer_type);
+            }
+            Instruction::ArrayLen { result, array } => {
+                // TODO: Call xin_array_len runtime function
+                let _ = array;
+                let zero_len = builder.ins().iconst(types::I64, 0);
+                self.store_variable(builder, result, zero_len, variables, var_counter, types::I64);
+            }
         }
         Ok(())
     }
@@ -849,6 +883,7 @@ impl AOTCodeGenerator {
             IRType::String => self.pointer_type,
             IRType::Void => panic!("Void type should not be converted to Cranelift type"),
             IRType::Ptr(_) => self.pointer_type,
+            IRType::Object => self.pointer_type, // Object types are pointers
         }
     }
 

@@ -952,6 +952,7 @@ impl IRBuilder {
             IRType::String => Type::String,
             IRType::Void => Type::Void,
             IRType::Ptr(_) => Type::String, // Treat pointers as strings for now
+            IRType::Object => Type::Object,
         }
     }
 

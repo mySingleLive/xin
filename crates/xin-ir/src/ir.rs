@@ -21,6 +21,7 @@ pub enum IRType {
     String,
     Void,
     Ptr(String), // Pointer to named type
+    Object,       // Generic object type for arrays, etc.
 }
 
 impl fmt::Display for IRType {
@@ -32,6 +33,7 @@ impl fmt::Display for IRType {
             IRType::String => write!(f, "string"),
             IRType::Void => write!(f, "void"),
             IRType::Ptr(inner) => write!(f, "ptr<{}>", inner),
+            IRType::Object => write!(f, "object"),
         }
     }
 }
@@ -128,6 +130,44 @@ pub enum Instruction {
     /// String deallocation: free value
     StringFree {
         value: Value,
+    },
+
+    /// Create array: %result = array_new capacity
+    ArrayNew {
+        result: Value,
+        capacity: usize,
+    },
+
+    /// Get element: %result = array_get array, index
+    ArrayGet {
+        result: Value,
+        array: Value,
+        index: Value,
+    },
+
+    /// Set element: array_set array, index, value
+    ArraySet {
+        array: Value,
+        index: Value,
+        value: Value,
+    },
+
+    /// Append element: array_push array, value
+    ArrayPush {
+        array: Value,
+        value: Value,
+    },
+
+    /// Pop element: %result = array_pop array
+    ArrayPop {
+        result: Value,
+        array: Value,
+    },
+
+    /// Get length: %result = array_len array
+    ArrayLen {
+        result: Value,
+        array: Value,
     },
 }
 

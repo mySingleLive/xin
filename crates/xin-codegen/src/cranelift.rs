@@ -231,6 +231,7 @@ impl CodeGenerator {
             IRType::String => types::I64, // String as pointer
             IRType::Void => panic!("Void type should not be converted to Cranelift type"),
             IRType::Ptr(_) => types::I64,
+            IRType::Object => types::I64, // Object types are pointers
         }
     }
 
