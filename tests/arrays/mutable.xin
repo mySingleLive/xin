@@ -1,0 +1,9 @@
+// tests/arrays/mutable.xin
+func main() {
+    let arr: mut int[] = [1, 2, 3]
+    arr[0] = 10
+    arr.push(4)
+    println(arr[0])
+    println(arr[3])
+    println(arr.len())
+}
