@@ -300,10 +300,11 @@ impl Parser {
         } else if self.match_kind(TokenKind::ColonColon) {
             // := syntax
             let name = self.consume_ident("expected variable name")?;
-            let type_annotation = if self.match_kind(TokenKind::Colon) {
-                Some(self.parse_type()?)
+            let (type_annotation, object_mutable) = if self.match_kind(TokenKind::Colon) {
+                let has_mut = self.match_kind(TokenKind::Mut);
+                (Some(self.parse_type()?), has_mut)
             } else {
-                None
+                (None, false)
             };
 
             let value = if self.match_kind(TokenKind::Eq) {
@@ -318,7 +319,7 @@ impl Parser {
                     mutable: false,
                     type_annotation,
                     value,
-                    object_mutable: false,
+                    object_mutable,
                 }),
                 span,
             ));
@@ -328,10 +329,11 @@ impl Parser {
 
         let name = self.consume_ident("expected variable name")?;
 
-        let type_annotation = if self.match_kind(TokenKind::Colon) {
-            Some(self.parse_type()?)
+        let (type_annotation, object_mutable) = if self.match_kind(TokenKind::Colon) {
+            let has_mut = self.match_kind(TokenKind::Mut);
+            (Some(self.parse_type()?), has_mut)
         } else {
-            None
+            (None, false)
         };
 
         let value = if self.match_kind(TokenKind::Eq) {
@@ -346,7 +348,7 @@ impl Parser {
                 mutable,
                 type_annotation,
                 value,
-                object_mutable: false,
+                object_mutable,
             }),
             span,
         ))
