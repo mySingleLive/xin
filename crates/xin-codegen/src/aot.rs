@@ -202,10 +202,12 @@ impl AOTCodeGenerator {
             std::collections::HashMap::new();
 
         // Process instructions
+        let func_name = &func.name;
         for instr in &func.instructions {
             self.compile_instruction(
                 &mut builder,
                 instr,
+                func_name,
                 &mut variables,
                 &mut var_counter,
                 &mut func_ref_cache,
@@ -233,6 +235,7 @@ impl AOTCodeGenerator {
         &self,
         builder: &mut FunctionBuilder,
         instr: &Instruction,
+        func_name: &str,
         variables: &mut std::collections::HashMap<String, Variable>,
         var_counter: &mut usize,
         func_ref_cache: &mut std::collections::HashMap<String, FuncRef>,
@@ -253,7 +256,9 @@ impl AOTCodeGenerator {
                     }
                     IRType::Bool => {
                         let b = value == "true";
-                        (builder.ins().iconst(types::I8, i64::from(b)), types::I8)
+                        // Store bool as I64 for consistency with comparison results
+                        // and to avoid type mismatch with logical operators
+                        (builder.ins().iconst(types::I64, i64::from(b)), types::I64)
                     }
                     _ => (builder.ins().iconst(types::I64, 0), types::I64),
                 };
@@ -588,7 +593,7 @@ impl AOTCodeGenerator {
         match ty {
             IRType::I64 => types::I64,
             IRType::F64 => types::F64,
-            IRType::Bool => types::I8,
+            IRType::Bool => types::I64, // Use I64 for bool to match logical operators
             IRType::String => self.pointer_type,
             IRType::Void => panic!("Void type should not be converted to Cranelift type"),
             IRType::Ptr(_) => self.pointer_type,

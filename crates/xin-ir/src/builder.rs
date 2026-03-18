@@ -50,7 +50,14 @@ impl IRBuilder {
             .return_type
             .as_ref()
             .map(|t| self.convert_type(t))
-            .unwrap_or(IRType::Void);
+            .unwrap_or_else(|| {
+                // main function returns i64 by default
+                if func.name == "main" {
+                    IRType::I64
+                } else {
+                    IRType::Void
+                }
+            });
 
         self.current_function = Some(IRFunction {
             name: func.name.clone(),
@@ -86,10 +93,25 @@ impl IRBuilder {
         }
 
         // Add implicit return if needed
+        let is_main_with_i64_return = func.name == "main"
+            && self.current_function.as_ref().map(|f| f.return_type == IRType::I64).unwrap_or(false);
+
         if let Some(f) = &self.current_function {
             if let Some(last) = f.instructions.last() {
                 if !matches!(last, Instruction::Return(_) | Instruction::Jump(_)) {
-                    self.emit(Instruction::Return(None));
+                    // For main function returning i64, return 0
+                    if is_main_with_i64_return {
+                        let zero = Value("%_main_zero".to_string());
+                        // Don't need to emit Const before Return, just use a constant value
+                        self.emit(Instruction::Const {
+                            result: zero.clone(),
+                            value: "0".to_string(),
+                            ty: IRType::I64,
+                        });
+                        self.emit(Instruction::Return(Some(zero)));
+                    } else {
+                        self.emit(Instruction::Return(None));
+                    }
                 }
             }
         }
@@ -296,8 +318,8 @@ impl IRBuilder {
                 let right_val = self.build_expr(right)?;
 
                 // Check if this is string concatenation
-                let left_type = Self::get_expr_type(left);
-                let right_type = Self::get_expr_type(right);
+                let left_type = self.get_expr_type_with_vars(left);
+                let right_type = self.get_expr_type_with_vars(right);
 
                 if *op == AstBinOp::Add {
                     let is_string_concat = matches!(left_type, Some(Type::String))
@@ -810,6 +832,7 @@ impl IRBuilder {
             ExprKind::StringLiteral(_) => Some(Type::String),
             ExprKind::Ident(name) => self.variable_types.get(name).cloned(),
             ExprKind::Binary { op, left, right } => {
+                // Check for string concatenation
                 if *op == AstBinOp::Add {
                     let left_type = self.get_expr_type_with_vars(left);
                     let right_type = self.get_expr_type_with_vars(right);
@@ -817,7 +840,12 @@ impl IRBuilder {
                         return Some(Type::String);
                     }
                 }
-                Some(Type::Int)
+                // Comparison and logical operators return Bool
+                match op {
+                    AstBinOp::Eq | AstBinOp::Ne | AstBinOp::Lt | AstBinOp::Gt | AstBinOp::Le | AstBinOp::Ge => Some(Type::Bool),
+                    AstBinOp::And | AstBinOp::Or => Some(Type::Bool),
+                    _ => Some(Type::Int),
+                }
             }
             _ => None,
         }

@@ -1,0 +1,15 @@
+// Test logical operators
+
+func main() {
+    // AND
+    println(true && true)    // true
+    println(true && false)   // false
+    println(false && true)   // false
+    println(false && false)  // false
+
+    // OR
+    println(false || true)   // true
+    println(true || false)   // true
+    println(true || true)    // true
+    println(false || false)  // false
+}
