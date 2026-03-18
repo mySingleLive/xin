@@ -1,0 +1,31 @@
+// Test if/else statements
+// NOTE: This test requires control flow code generation to be implemented
+
+func main() {
+    let a = 10
+
+    if (a > 5) {
+        println("greater")
+    } else {
+        println("less")
+    }
+
+    if (a < 5) {
+        println("small")
+    } else if (a == 10) {
+        println("equal")
+    } else {
+        println("other")
+    }
+
+    // Nested if
+    if (a > 0) {
+        if (a == 10) {
+            println("nested")
+        }
+    }
+
+    // Conditional expression
+    let result = a == 10 ? "ten" : "other"
+    println(result)
+}

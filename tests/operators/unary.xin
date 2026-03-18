@@ -1,0 +1,11 @@
+// Test unary operators
+
+func main() {
+    // Negation
+    println(-42)      // -42
+    println(-(-42))   // 42
+
+    // Logical NOT
+    println(!true)    // false
+    println(!false)   // true
+}

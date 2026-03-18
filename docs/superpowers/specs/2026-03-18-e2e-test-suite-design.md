@@ -218,6 +218,10 @@ hello
 true
 false
 hello world
+100
+2.5
+false
+variable
 ```
 
 ### 3.2 control_flow/ 目录（第二阶段）
@@ -343,6 +347,7 @@ Float: 3.14
 String: test
 Bool: true
 Hex: 0xff
+Octal: 100
 ```
 
 ### 3.5 operators/ 目录
@@ -363,9 +368,15 @@ false
 true
 false
 true
+false
 true
 false
 true
+true
+false
+true
+true
+false
 ```
 
 #### 3.5.2 logical.xin

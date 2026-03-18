@@ -1,0 +1,10 @@
+// Test printf format specifiers
+
+func main() {
+    printf("Integer: %d\n", 42)
+    printf("Float: %f\n", 3.14)
+    printf("String: %s\n", "test")
+    printf("Bool: %b\n", true)
+    printf("Hex: 0x%x\n", 255)
+    printf("Octal: %o\n", 64)
+}

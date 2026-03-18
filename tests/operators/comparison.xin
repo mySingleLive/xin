@@ -1,0 +1,29 @@
+// Test comparison operators
+
+func main() {
+    // Equality
+    println(10 == 10)   // true
+    println(10 == 5)    // false
+
+    // Inequality
+    println(10 != 5)    // true
+    println(10 != 10)   // false
+
+    // Less than
+    println(5 < 10)     // true
+    println(10 < 5)     // false
+
+    // Greater than
+    println(10 > 5)     // true
+    println(5 > 10)     // false
+
+    // Less than or equal
+    println(10 <= 10)   // true
+    println(5 <= 10)    // true
+    println(15 <= 10)   // false
+
+    // Greater than or equal
+    println(10 >= 10)   // true
+    println(15 >= 10)   // true
+    println(5 >= 10)    // false
+}

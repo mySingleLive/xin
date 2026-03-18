@@ -1,0 +1,18 @@
+// Test variable declarations
+
+func main() {
+    // Variable declarations with type inference
+    let a = 42
+    let b = 3.14
+    let c = true
+    let d = "hello"
+
+    println(a)
+    println(b)
+    println(c)
+    println(d)
+
+    // Print using variables
+    let x = 100
+    println(x)
+}

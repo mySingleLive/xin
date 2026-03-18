@@ -1,0 +1,27 @@
+// Test basic types
+
+func main() {
+    // Integer literal
+    println(42)
+
+    // Float literal
+    println(3.14)
+
+    // Boolean literals
+    println(true)
+    println(false)
+
+    // String literal
+    println("hello world")
+
+    // Print using variables of each type
+    let i = 100
+    let f = 2.5
+    let b = false
+    let s = "variable"
+
+    println(i)
+    println(f)
+    println(b)
+    println(s)
+}

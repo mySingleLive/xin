@@ -1,0 +1,6 @@
+Integer: 42
+Float: 3.14
+String: test
+Bool: true
+Hex: 0xff
+Octal: 100
