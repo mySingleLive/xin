@@ -105,6 +105,31 @@ void xin_str_free(char* s) {
     }
 }
 
+// Convert integer to string
+char* xin_int_to_str(int64_t n) {
+    char* buf = malloc(32);
+    if (buf == NULL) return NULL;
+    snprintf(buf, 32, "%lld", (long long)n);
+    return buf;
+}
+
+// Convert float to string
+char* xin_float_to_str(double d) {
+    char* buf = malloc(64);
+    if (buf == NULL) return NULL;
+    snprintf(buf, 64, "%g", d);
+    return buf;
+}
+
+// Convert boolean to string
+char* xin_bool_to_str(int8_t b) {
+    const char* val = b ? "true" : "false";
+    char* buf = malloc(8);
+    if (buf == NULL) return NULL;
+    strcpy(buf, val);
+    return buf;
+}
+
 // Printf implementation with %b support for boolean
 void xin_printf(const char* format, ...) {
     va_list args;
