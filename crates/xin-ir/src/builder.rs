@@ -1,6 +1,6 @@
 //! IR Builder
 
-use xin_ast::{BinOp as AstBinOp, Decl, DeclKind, Expr, ExprKind, FuncDecl, SourceFile, Stmt, StmtKind, Type};
+use xin_ast::{BinOp as AstBinOp, Decl, DeclKind, Expr, ExprKind, FuncDecl, SourceFile, Stmt, StmtKind, TemplatePart, Type};
 
 use crate::{BinOp, ConcatType, ExternFunction, Instruction, IRFunction, IRModule, IRType, Value};
 
@@ -321,6 +321,9 @@ impl IRBuilder {
                     string_index,
                 });
                 Some(result)
+            }
+            ExprKind::TemplateLiteral(parts) => {
+                self.build_template_literal(parts)
             }
             ExprKind::BoolLiteral(b) => {
                 let result = self.new_temp();
@@ -899,6 +902,7 @@ impl IRBuilder {
             ExprKind::FloatLiteral(_) => Some(Type::Float),
             ExprKind::BoolLiteral(_) => Some(Type::Bool),
             ExprKind::StringLiteral(_) => Some(Type::String),
+            ExprKind::TemplateLiteral(_) => Some(Type::String),
             ExprKind::Ident(name) => self.variable_types.get(name).cloned(),
             ExprKind::Binary { op, left, right } => {
                 // Check for string concatenation
@@ -987,6 +991,112 @@ impl IRBuilder {
         };
 
         self.declare_extern_if_needed(func_name, param_types, Some(IRType::Ptr("char".to_string())));
+    }
+
+    fn build_template_literal(&mut self, parts: &[TemplatePart]) -> Option<Value> {
+        let mut result: Option<Value> = None;
+
+        for part in parts {
+            match part {
+                TemplatePart::Text(text) => {
+                    let string_index = self.module.add_string(text);
+                    let text_val = self.new_temp();
+                    self.emit(Instruction::StringConst {
+                        result: text_val.clone(),
+                        string_index,
+                    });
+                    result = Some(self.concat_strings(result, text_val));
+                }
+                TemplatePart::Expr(expr) => {
+                    let expr_val = self.build_expr(expr)?;
+                    let expr_type = self.get_expr_type_with_vars(expr);
+                    let str_val = self.convert_to_string(expr_val, expr_type);
+                    result = Some(self.concat_strings(result, str_val));
+                }
+            }
+        }
+
+        result.or_else(|| {
+            // Empty template
+            let string_index = self.module.add_string("");
+            let result = self.new_temp();
+            self.emit(Instruction::StringConst {
+                result: result.clone(),
+                string_index,
+            });
+            Some(result)
+        })
+    }
+
+    fn convert_to_string(&mut self, value: Value, ty: Option<Type>) -> Value {
+        match ty {
+            Some(Type::String) => value,
+            Some(Type::Int) => {
+                let result = self.new_temp();
+                self.emit(Instruction::ToString {
+                    result: result.clone(),
+                    value,
+                    from_type: IRType::I64,
+                });
+                self.declare_extern_if_needed(
+                    "xin_int_to_str",
+                    vec![IRType::I64],
+                    Some(IRType::Ptr("char".to_string())),
+                );
+                result
+            }
+            Some(Type::Float) => {
+                let result = self.new_temp();
+                self.emit(Instruction::ToString {
+                    result: result.clone(),
+                    value,
+                    from_type: IRType::F64,
+                });
+                self.declare_extern_if_needed(
+                    "xin_float_to_str",
+                    vec![IRType::F64],
+                    Some(IRType::Ptr("char".to_string())),
+                );
+                result
+            }
+            Some(Type::Bool) => {
+                let result = self.new_temp();
+                self.emit(Instruction::ToString {
+                    result: result.clone(),
+                    value,
+                    from_type: IRType::Bool,
+                });
+                self.declare_extern_if_needed(
+                    "xin_bool_to_str",
+                    vec![IRType::Bool],
+                    Some(IRType::Ptr("char".to_string())),
+                );
+                result
+            }
+            _ => value,
+        }
+    }
+
+    fn concat_strings(&mut self, left: Option<Value>, right: Value) -> Value {
+        match left {
+            None => right,
+            Some(left_val) => {
+                let result = self.new_temp();
+                self.emit(Instruction::StringConcat {
+                    result: result.clone(),
+                    left: left_val,
+                    left_type: ConcatType::String,
+                    right,
+                    right_type: ConcatType::String,
+                });
+                self.declare_extern_if_needed(
+                    "xin_str_concat_ss",
+                    vec![IRType::Ptr("char".to_string()), IRType::Ptr("char".to_string())],
+                    Some(IRType::Ptr("char".to_string())),
+                );
+                result
+            }
+        }
     }
 }
 

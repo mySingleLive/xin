@@ -118,6 +118,13 @@ pub enum Instruction {
         right_type: ConcatType,
     },
 
+    /// Convert to string: %result = to_string value
+    ToString {
+        result: Value,
+        value: Value,
+        from_type: IRType,
+    },
+
     /// String deallocation: free value
     StringFree {
         value: Value,
