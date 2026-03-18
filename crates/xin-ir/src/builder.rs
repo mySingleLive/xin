@@ -460,6 +460,10 @@ impl IRBuilder {
                         Some(result)
                     }
                     "push" => {
+                        if args.is_empty() {
+                            // Semantic analysis should catch this, but be defensive
+                            return None;
+                        }
                         let obj_val = self.build_expr(object)?;
                         let arg_val = self.build_expr(&args[0])?;
                         self.emit(Instruction::ArrayPush {
