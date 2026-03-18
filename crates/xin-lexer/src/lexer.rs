@@ -201,6 +201,9 @@ impl Lexer {
             // String literal
             '"' => self.string_literal(start_line, start_col),
 
+            // Template string literal
+            '`' => self.template_string(start_line, start_col),
+
             // Number literals
             '0'..='9' => self.number_literal(start_line, start_col, ch),
 
@@ -242,6 +245,34 @@ impl Lexer {
 
         self.advance(); // closing "
         Ok(Token::new(TokenKind::StringLiteral, value, start_line, start_col))
+    }
+
+    fn template_string(&mut self, start_line: usize, start_col: usize) -> Result<Token, LexerError> {
+        let mut value = String::new();
+
+        while !self.is_at_end() && self.peek() != '`' {
+            let ch = self.advance();
+            if ch == '\\' {
+                // Keep escape sequences for parser to handle
+                value.push(ch);
+                if !self.is_at_end() {
+                    value.push(self.advance());
+                }
+            } else if ch == '\n' {
+                self.line += 1;
+                self.column = 1;
+                value.push(ch);
+            } else {
+                value.push(ch);
+            }
+        }
+
+        if self.is_at_end() {
+            return Err(LexerError::UnterminatedTemplate);
+        }
+
+        self.advance(); // closing `
+        Ok(Token::new(TokenKind::TemplateString, value, start_line, start_col))
     }
 
     fn number_literal(&mut self, start_line: usize, start_col: usize, first: char) -> Result<Token, LexerError> {
@@ -399,5 +430,30 @@ mod tests {
         let tokens = lexer.tokenize().unwrap();
         assert_eq!(tokens[0].kind, TokenKind::FloatLiteral);
         assert_eq!(tokens[1].kind, TokenKind::FloatLiteral);
+    }
+
+    #[test]
+    fn test_tokenize_template_string() {
+        let mut lexer = Lexer::new("`hello`");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens.len(), 2); // template + EOF
+        assert_eq!(tokens[0].kind, TokenKind::TemplateString);
+        assert_eq!(tokens[0].text, "hello");
+    }
+
+    #[test]
+    fn test_tokenize_template_with_expr() {
+        let mut lexer = Lexer::new("`name is {name}`");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::TemplateString);
+        assert_eq!(tokens[0].text, "name is {name}");
+    }
+
+    #[test]
+    fn test_tokenize_template_with_escape() {
+        let mut lexer = Lexer::new("`backtick: \\``");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::TemplateString);
+        assert_eq!(tokens[0].text, "backtick: \\`");
     }
 }

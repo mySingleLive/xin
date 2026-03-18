@@ -11,6 +11,9 @@ pub enum LexerError {
     #[error("Unterminated string")]
     UnterminatedString,
 
+    #[error("Unterminated template string")]
+    UnterminatedTemplate,
+
     #[error("Invalid number: {0}")]
     InvalidNumber(String),
 
@@ -24,6 +27,7 @@ impl From<LexerError> for Diagnostic {
             LexerError::UnexpectedChar(_) => DiagnosticCode::L001,
             LexerError::UnterminatedString => DiagnosticCode::L002,
             LexerError::InvalidNumber(_) => DiagnosticCode::L003,
+            LexerError::UnterminatedTemplate => DiagnosticCode::L004,
             LexerError::InvalidEscape(_) => DiagnosticCode::L001,
         };
         Diagnostic::error(code, err.to_string())

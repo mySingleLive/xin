@@ -18,6 +18,7 @@ pub enum DiagnosticCode {
     L001, // Unexpected character
     L002, // Unterminated string
     L003, // Invalid number
+    L004, // Unterminated template string
 
     // Parser errors (P001-P099)
     P001, // Unexpected token
@@ -44,6 +45,7 @@ impl DiagnosticCode {
             DiagnosticCode::L001 => "E001",
             DiagnosticCode::L002 => "E002",
             DiagnosticCode::L003 => "E003",
+            DiagnosticCode::L004 => "E004",
             DiagnosticCode::P001 => "E101",
             DiagnosticCode::P002 => "E102",
             DiagnosticCode::P003 => "E103",
@@ -59,7 +61,7 @@ impl DiagnosticCode {
 
     pub fn category(&self) -> &'static str {
         match self {
-            DiagnosticCode::L001 | DiagnosticCode::L002 | DiagnosticCode::L003 => "lexer",
+            DiagnosticCode::L001 | DiagnosticCode::L002 | DiagnosticCode::L003 | DiagnosticCode::L004 => "lexer",
             DiagnosticCode::P001 | DiagnosticCode::P002 | DiagnosticCode::P003 => "parser",
             DiagnosticCode::S001 | DiagnosticCode::S002 | DiagnosticCode::S003 | DiagnosticCode::S004 => "semantic",
             DiagnosticCode::O001 | DiagnosticCode::O002 => "ownership",
