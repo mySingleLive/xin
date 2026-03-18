@@ -18,12 +18,27 @@ let d = []                      // object[] (空数组默认类型)
 let e: string[] = []            // string[] (显式类型)
 ```
 
-### 2.2 类型注解
+### 2.2 类型注解与可变性
+
+Xin 语言使用两级可变性模型：
 
 ```xin
-let x: int[] = [1, 2, 3]        // 不可变数组
-let y: mut int[] = [1, 2, 3]    // 可变数组
+let x: int[] = [1, 2, 3]        // 不可变数组：不可重新赋值，不可修改元素
+var y: int[] = [1, 2, 3]        // 可重新赋值，但不可修改元素
+let z: mut int[] = [1, 2, 3]    // 不可重新赋值，但可修改元素
+var w: mut int[] = [1, 2, 3]    // 可重新赋值，可修改元素
 ```
+
+**可变性关键字位置**：
+- `let` / `var` 关键字：控制变量是否可重新赋值（`mutable` 字段）
+- `mut` 在类型注解中：控制数组元素是否可修改（`object_mutable` 字段）
+
+| 声明 | `mutable` | `object_mutable` | 重新赋值 | 修改元素 |
+|------|-----------|------------------|---------|---------|
+| `let arr: int[]` | false | false | ✗ | ✗ |
+| `var arr: int[]` | true | false | ✓ | ✗ |
+| `let arr: mut int[]` | false | true | ✗ | ✓ |
+| `var arr: mut int[]` | true | true | ✓ | ✓ |
 
 ### 2.3 索引访问
 
@@ -114,6 +129,22 @@ matrix[0][0] = 10        // ✗ 内层不可变 (int[][] 非 mut int[][])
 
 方法在类型系统中作为内置方法处理，不需要显式定义 trait。
 
+### 3.6 与现有语法的关系
+
+**`mut` 关键字的一致性**：
+
+Xin 语言中 `mut` 关键字已有使用场景：
+
+| 位置 | 语法 | 语义 |
+|------|------|------|
+| 指针类型 | `*mut T` | 可变指针，可修改指向的值 |
+| 数组类型（本设计） | `mut T[]` | 可变数组，可修改元素 |
+
+**设计一致性**：
+- `mut` 在类型位置表示"内部可变性"
+- 与 `*mut T` 指针语法保持一致
+- 区别于变量声明位置的 `var` 关键字（控制变量重新赋值）
+
 ## 4. AST 表示
 
 ### 4.1 现有类型（已实现）
@@ -147,20 +178,24 @@ pub enum Type {
 
 ### 4.3 类型可变性
 
-在变量声明中处理可变性：
+数组类型的可变性通过现有的 `VarDecl` 结构处理：
 
 ```rust
-// crates/xin-ast/src/stmt.rs
+// crates/xin-ast/src/stmt.rs (已存在)
 
 pub struct VarDecl {
     pub name: String,
+    pub mutable: bool,           // let/var 控制，决定变量是否可重新赋值
     pub type_annotation: Option<Type>,
     pub value: Option<Expr>,
-    pub mutable: bool,  // 已存在
+    pub object_mutable: bool,    // 类型注解中的 mut 控制，决定对象是否可修改
 }
 ```
 
-数组类型本身不携带可变性，可变性由变量声明决定。
+**设计说明**：
+- `mutable` 字段由 `let`/`var` 关键字决定（现有实现）
+- `object_mutable` 字段由类型注解中的 `mut` 关键字决定（本设计扩展）
+- 此设计遵循现有代码模式，复用已有的 `object_mutable` 字段
 
 ## 5. 实现细节
 
@@ -170,12 +205,15 @@ pub struct VarDecl {
 
 ### 5.2 Parser 层
 
-**类型解析**：
+**类型解析（扩展以支持 `mut` 前缀）**：
 
 ```rust
 // crates/xin-parser/src/parser.rs
 
 fn parse_type(&mut self) -> Result<Type, ParserError> {
+    // 检查 mut 前缀（用于可变数组类型）
+    let is_mutable = self.match_kind(TokenKind::Mut);
+
     let mut ty = self.parse_primary_type()?;
 
     // 数组后缀: T[]
@@ -184,7 +222,37 @@ fn parse_type(&mut self) -> Result<Type, ParserError> {
         ty = Type::Array(Box::new(ty));
     }
 
+    // 如果有 mut 前缀，包装为可变类型
+    // 注意：这里需要在语义分析阶段使用，Parser 只负责解析
+    // 实际实现可以将 is_mutable 信息返回给调用者
     Ok(ty)
+}
+
+fn parse_var_decl(&mut self, mutable: bool) -> Result<VarDecl, ParserError> {
+    let name = self.consume_ident()?;
+    let type_annotation = if self.match_kind(TokenKind::Colon) {
+        // 解析类型注解，检查是否有 mut 前缀
+        let has_mut = self.match_kind(TokenKind::Mut);
+        let ty = self.parse_type()?;
+        // 返回类型和可变性信息
+        Some((ty, has_mut))
+    } else {
+        None
+    };
+
+    let value = if self.match_kind(TokenKind::Assign) {
+        Some(self.parse_expr()?)
+    } else {
+        None
+    };
+
+    Ok(VarDecl {
+        name,
+        mutable,  // let/var 关键字决定
+        type_annotation: type_annotation.as_ref().map(|(t, _)| t.clone()),
+        value,
+        object_mutable: type_annotation.map(|(_, has_mut)| has_mut).unwrap_or(false),
+    })
 }
 ```
 
@@ -241,7 +309,7 @@ fn check_index_access(&mut self, object: &Expr, index: &Expr) -> Result<Type, Se
 
 **可变性检查**：
 
-通过作用域查找变量的可变性标记：
+通过作用域查找变量的 `object_mutable` 标记：
 
 ```rust
 fn check_method_call(&mut self, object: &Expr, method: &str) -> Result<Type, SemanticError> {
@@ -249,10 +317,10 @@ fn check_method_call(&mut self, object: &Expr, method: &str) -> Result<Type, Sem
     if let ExprKind::Ident(name) = &object.kind {
         // 从作用域查找变量的可变性
         let symbol = self.scopes.lookup(name)?;
-        let is_mutable = symbol.is_mutable();
+        let object_mutable = symbol.object_mutable;  // 使用 object_mutable 字段
 
         match method {
-            "push" | "pop" if !is_mutable => {
+            "push" | "pop" if !object_mutable => {
                 return Err(SemanticError::ImmutableArrayModification {
                     method: method.to_string(),
                     span: object.span.clone(),
@@ -277,7 +345,7 @@ fn check_assignment(&mut self, target: &Expr, value: &Expr) -> Result<Type, Sema
             // 检查 object 是否可变
             if let ExprKind::Ident(name) = &object.kind {
                 let symbol = self.scopes.lookup(name)?;
-                if !symbol.is_mutable() {
+                if !symbol.object_mutable {  // 使用 object_mutable 字段
                     return Err(SemanticError::ImmutableArrayModification {
                         method: "index assignment".to_string(),
                         span: target.span.clone(),
@@ -570,9 +638,9 @@ error[S005]: cannot modify immutable array
   --> main.xin:5:5
    |
 5  |     arr[0] = 1
-   |     ^^^^^^^^^^ array `arr` is immutable
+   |     ^^^^^^^^^^ array `arr` elements are immutable
    |
-   = help: declare as `mut int[]` to allow modification
+   = help: declare type as `mut int[]` to allow element modification
 
 error[S006]: array element type mismatch
   --> main.xin:2:20
