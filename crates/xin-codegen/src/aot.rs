@@ -53,7 +53,10 @@ impl AOTCodeGenerator {
 
     /// Compile an IR module
     pub fn compile(&mut self, module: &IRModule) -> Result<(), String> {
-        // First, declare all external functions
+        // First, declare array runtime functions
+        self.declare_array_runtime_functions()?;
+
+        // Then, declare all external functions from IR
         for extern_func in &module.extern_functions {
             self.declare_extern_function(extern_func)?;
         }
@@ -72,6 +75,73 @@ impl AOTCodeGenerator {
         for func in &module.functions {
             self.compile_function(func)?;
         }
+
+        Ok(())
+    }
+
+    /// Declare array runtime functions
+    fn declare_array_runtime_functions(&mut self) -> Result<(), String> {
+        // xin_array_new(int64_t capacity) -> xin_array*
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(self.pointer_type));
+        let func_id = self.module
+            .declare_function("xin_array_new", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_array_new: {}", e))?;
+        self.extern_func_ids.insert("xin_array_new".to_string(), func_id);
+        self.func_sigs.insert("xin_array_new".to_string(), sig);
+
+        // xin_array_get(xin_array* arr, int64_t index) -> void*
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(self.pointer_type));
+        let func_id = self.module
+            .declare_function("xin_array_get", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_array_get: {}", e))?;
+        self.extern_func_ids.insert("xin_array_get".to_string(), func_id);
+        self.func_sigs.insert("xin_array_get".to_string(), sig);
+
+        // xin_array_set(xin_array* arr, int64_t index, void* value) -> void
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(self.pointer_type));
+        let func_id = self.module
+            .declare_function("xin_array_set", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_array_set: {}", e))?;
+        self.extern_func_ids.insert("xin_array_set".to_string(), func_id);
+        self.func_sigs.insert("xin_array_set".to_string(), sig);
+
+        // xin_array_push(xin_array* arr, void* value) -> void
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(self.pointer_type));
+        let func_id = self.module
+            .declare_function("xin_array_push", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_array_push: {}", e))?;
+        self.extern_func_ids.insert("xin_array_push".to_string(), func_id);
+        self.func_sigs.insert("xin_array_push".to_string(), sig);
+
+        // xin_array_pop(xin_array* arr) -> void*
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.returns.push(AbiParam::new(self.pointer_type));
+        let func_id = self.module
+            .declare_function("xin_array_pop", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_array_pop: {}", e))?;
+        self.extern_func_ids.insert("xin_array_pop".to_string(), func_id);
+        self.func_sigs.insert("xin_array_pop".to_string(), sig);
+
+        // xin_array_len(xin_array* arr) -> int64_t
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = self.module
+            .declare_function("xin_array_len", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_array_len: {}", e))?;
+        self.extern_func_ids.insert("xin_array_len".to_string(), func_id);
+        self.func_sigs.insert("xin_array_len".to_string(), sig);
 
         Ok(())
     }
@@ -775,38 +845,90 @@ impl AOTCodeGenerator {
                 let ret_val = builder.inst_results(call_val)[0];
                 self.store_variable(builder, result, ret_val, variables, var_counter, self.pointer_type);
             }
-            // Array instructions - stub implementations for Task 12
-            Instruction::ArrayNew { result, capacity: _ } => {
-                // TODO: Call xin_array_new runtime function
-                // For now, return a null pointer
-                let null_ptr = builder.ins().iconst(self.pointer_type, 0);
-                self.store_variable(builder, result, null_ptr, variables, var_counter, self.pointer_type);
+            // Array instructions
+            Instruction::ArrayNew { result, capacity } => {
+                // Call xin_array_new(capacity) -> xin_array*
+                let capacity_val = builder.ins().iconst(types::I64, *capacity as i64);
+
+                let func_ref = self.get_or_create_func_ref(
+                    builder,
+                    "xin_array_new",
+                    func_ref_cache,
+                )?;
+
+                let call_val = builder.ins().call(func_ref, &[capacity_val]);
+                let arr_ptr = builder.inst_results(call_val)[0];
+                self.store_variable(builder, result, arr_ptr, variables, var_counter, self.pointer_type);
             }
             Instruction::ArrayGet { result, array, index } => {
-                // TODO: Call xin_array_get runtime function
-                let _ = (array, index);
-                let null_val = builder.ins().iconst(self.pointer_type, 0);
-                self.store_variable(builder, result, null_val, variables, var_counter, self.pointer_type);
+                // Call xin_array_get(array, index) -> void*
+                let arr_val = self.load_variable(builder, array, variables)?;
+                let idx_val = self.load_variable(builder, index, variables)?;
+
+                let func_ref = self.get_or_create_func_ref(
+                    builder,
+                    "xin_array_get",
+                    func_ref_cache,
+                )?;
+
+                let call_val = builder.ins().call(func_ref, &[arr_val, idx_val]);
+                let val = builder.inst_results(call_val)[0];
+                self.store_variable(builder, result, val, variables, var_counter, self.pointer_type);
             }
             Instruction::ArraySet { array, index, value } => {
-                // TODO: Call xin_array_set runtime function
-                let _ = (array, index, value);
+                // Call xin_array_set(array, index, value) -> void
+                let arr_val = self.load_variable(builder, array, variables)?;
+                let idx_val = self.load_variable(builder, index, variables)?;
+                let val = self.load_variable(builder, value, variables)?;
+
+                let func_ref = self.get_or_create_func_ref(
+                    builder,
+                    "xin_array_set",
+                    func_ref_cache,
+                )?;
+
+                builder.ins().call(func_ref, &[arr_val, idx_val, val]);
             }
             Instruction::ArrayPush { array, value } => {
-                // TODO: Call xin_array_push runtime function
-                let _ = (array, value);
+                // Call xin_array_push(array, value) -> void
+                let arr_val = self.load_variable(builder, array, variables)?;
+                let val = self.load_variable(builder, value, variables)?;
+
+                let func_ref = self.get_or_create_func_ref(
+                    builder,
+                    "xin_array_push",
+                    func_ref_cache,
+                )?;
+
+                builder.ins().call(func_ref, &[arr_val, val]);
             }
             Instruction::ArrayPop { result, array } => {
-                // TODO: Call xin_array_pop runtime function
-                let _ = array;
-                let null_val = builder.ins().iconst(self.pointer_type, 0);
-                self.store_variable(builder, result, null_val, variables, var_counter, self.pointer_type);
+                // Call xin_array_pop(array) -> void*
+                let arr_val = self.load_variable(builder, array, variables)?;
+
+                let func_ref = self.get_or_create_func_ref(
+                    builder,
+                    "xin_array_pop",
+                    func_ref_cache,
+                )?;
+
+                let call_val = builder.ins().call(func_ref, &[arr_val]);
+                let val = builder.inst_results(call_val)[0];
+                self.store_variable(builder, result, val, variables, var_counter, self.pointer_type);
             }
             Instruction::ArrayLen { result, array } => {
-                // TODO: Call xin_array_len runtime function
-                let _ = array;
-                let zero_len = builder.ins().iconst(types::I64, 0);
-                self.store_variable(builder, result, zero_len, variables, var_counter, types::I64);
+                // Call xin_array_len(array) -> int64_t
+                let arr_val = self.load_variable(builder, array, variables)?;
+
+                let func_ref = self.get_or_create_func_ref(
+                    builder,
+                    "xin_array_len",
+                    func_ref_cache,
+                )?;
+
+                let call_val = builder.ins().call(func_ref, &[arr_val]);
+                let len = builder.inst_results(call_val)[0];
+                self.store_variable(builder, result, len, variables, var_counter, types::I64);
             }
         }
         Ok(())
@@ -825,6 +947,36 @@ impl AOTCodeGenerator {
             // Return a default value for undefined variables
             Ok(builder.ins().iconst(types::I64, 0))
         }
+    }
+
+    /// Get or create a function reference for external function calls
+    fn get_or_create_func_ref(
+        &self,
+        builder: &mut FunctionBuilder,
+        func_name: &str,
+        func_ref_cache: &mut std::collections::HashMap<String, FuncRef>,
+    ) -> Result<FuncRef, String> {
+        if let Some(&fr) = func_ref_cache.get(func_name) {
+            return Ok(fr);
+        }
+
+        let func_id = *self.extern_func_ids.get(func_name)
+            .ok_or_else(|| format!("Function '{}' not declared", func_name))?;
+        let sig = self.func_sigs.get(func_name)
+            .ok_or_else(|| format!("Signature not found for function '{}'", func_name))?
+            .clone();
+        let sig_ref = builder.func.import_signature(sig);
+        let user_func_name = builder.func.declare_imported_user_function(UserExternalName {
+            namespace: 0,
+            index: func_id.as_u32(),
+        });
+        let fr = builder.import_function(ExtFuncData {
+            name: ExternalName::user(user_func_name),
+            signature: sig_ref,
+            colocated: true,
+        });
+        func_ref_cache.insert(func_name.to_string(), fr);
+        Ok(fr)
     }
 
     /// Load a variable by name (string)
