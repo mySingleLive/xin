@@ -15,6 +15,9 @@ pub enum Type {
     String,
     /// void
     Void,
+    /// object 类型，表示任意类型的运行时值
+    /// 用于混合类型数组的元素类型
+    Object,
     /// User-defined type name
     Named(String),
     /// Pointer type: *T or *mut T
@@ -46,6 +49,7 @@ impl fmt::Display for Type {
             Type::Bool => write!(f, "bool"),
             Type::String => write!(f, "string"),
             Type::Void => write!(f, "void"),
+            Type::Object => write!(f, "object"),
             Type::Named(name) => write!(f, "{}", name),
             Type::Pointer { inner, mutable } => {
                 if *mutable {

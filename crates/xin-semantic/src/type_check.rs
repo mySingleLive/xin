@@ -955,7 +955,7 @@ impl TypeChecker {
 
     fn check_type_exists(&self, ty: &Type) -> Result<(), SemanticError> {
         match ty {
-            Type::Int | Type::Float | Type::Bool | Type::String | Type::Void => Ok(()),
+            Type::Int | Type::Float | Type::Bool | Type::String | Type::Void | Type::Object => Ok(()),
             Type::Named(name) => {
                 if self.scopes.lookup(name).is_none() {
                     Err(SemanticError::UndefinedType(name.clone()))
