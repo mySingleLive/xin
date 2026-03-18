@@ -1,5 +1,8 @@
 //! Parser implementation
 
+use std::iter::Peekable;
+use std::str::Chars;
+
 use xin_ast::*;
 use xin_diagnostics::{SourceLocation, SourceSpan};
 use xin_lexer::Lexer;
@@ -962,6 +965,10 @@ impl Parser {
                 self.advance();
                 Ok(Expr::new(ExprKind::StringLiteral(value), span))
             }
+            TokenKind::TemplateString => {
+                let text = self.advance().text.clone();
+                self.parse_template_literal(&text, span)
+            }
             TokenKind::True => {
                 self.advance();
                 Ok(Expr::new(ExprKind::BoolLiteral(true), span))
@@ -1086,6 +1093,108 @@ impl Parser {
             }
             _ => Err(ParserError::ExpectedExpression),
         }
+    }
+
+    fn parse_template_literal(&mut self, raw: &str, span: SourceSpan) -> Result<Expr, ParserError> {
+        let mut parts = Vec::new();
+        let mut chars = raw.chars().peekable();
+        let mut text = String::new();
+
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\\' => {
+                    if let Some(escaped) = chars.next() {
+                        match escaped {
+                            '`' | '\\' | '{' | '}' => text.push(escaped),
+                            'n' => text.push('\n'),
+                            't' => text.push('\t'),
+                            'r' => text.push('\r'),
+                            _ => {
+                                return Err(ParserError::InvalidEscape(escaped));
+                            }
+                        }
+                    }
+                }
+                '{' => {
+                    if !text.is_empty() {
+                        parts.push(TemplatePart::Text(text.clone()));
+                        text.clear();
+                    }
+                    let expr = self.parse_template_expr(&mut chars)?;
+                    parts.push(TemplatePart::Expr(Box::new(expr)));
+                }
+                _ => text.push(ch),
+            }
+        }
+
+        if !text.is_empty() {
+            parts.push(TemplatePart::Text(text));
+        }
+
+        Ok(Expr::new(ExprKind::TemplateLiteral(parts), span))
+    }
+
+    fn parse_template_expr(&mut self, chars: &mut Peekable<Chars>) -> Result<Expr, ParserError> {
+        let mut expr_chars = String::new();
+        let mut brace_count = 1;
+        let mut string_delim: Option<char> = None;
+
+        while brace_count > 0 {
+            let ch = chars.next().ok_or(ParserError::UnclosedTemplateExpr)?;
+
+            match (ch, string_delim) {
+                ('"' | '\'', None) => {
+                    string_delim = Some(ch);
+                    expr_chars.push(ch);
+                }
+                (c, Some(d)) if c == d => {
+                    string_delim = None;
+                    expr_chars.push(ch);
+                }
+                ('\\', Some(_)) => {
+                    expr_chars.push(ch);
+                    if let Some(next) = chars.next() {
+                        expr_chars.push(next);
+                    }
+                }
+                ('{', None) => {
+                    brace_count += 1;
+                    expr_chars.push(ch);
+                }
+                ('}', None) => {
+                    brace_count -= 1;
+                    if brace_count > 0 {
+                        expr_chars.push(ch);
+                    }
+                }
+                _ => expr_chars.push(ch),
+            }
+        }
+
+        // Parse the collected expression string
+        self.parse_expr_from_str(&expr_chars)
+    }
+
+    fn parse_expr_from_str(&mut self, expr_str: &str) -> Result<Expr, ParserError> {
+        // Create a temporary lexer and parser for the expression
+        let mut temp_lexer = Lexer::new(expr_str);
+        let temp_tokens = temp_lexer.tokenize().map_err(|e| {
+            ParserError::LexerError(e.to_string())
+        })?;
+
+        // Save current state
+        let original_tokens = std::mem::replace(&mut self.tokens, temp_tokens);
+        let original_current = self.current;
+        self.current = 0;
+
+        // Parse expression
+        let result = self.parse_expr();
+
+        // Restore state
+        self.tokens = original_tokens;
+        self.current = original_current;
+
+        result
     }
 
     fn parse_if_expr(&mut self) -> Result<Expr, ParserError> {

@@ -26,6 +26,12 @@ pub enum ParserError {
 
     #[error("Lexer error: {0}")]
     LexerError(String),
+
+    #[error("Invalid escape character: '{0}'")]
+    InvalidEscape(char),
+
+    #[error("Unclosed template expression")]
+    UnclosedTemplateExpr,
 }
 
 impl ParserError {
@@ -46,6 +52,8 @@ impl From<ParserError> for Diagnostic {
             ParserError::MissingClosingDelimiter(_) => DiagnosticCode::P003,
             ParserError::InvalidAssignmentTarget => DiagnosticCode::P001,
             ParserError::LexerError(_) => DiagnosticCode::P001,
+            ParserError::InvalidEscape(_) => DiagnosticCode::P001,
+            ParserError::UnclosedTemplateExpr => DiagnosticCode::P003,
         };
         Diagnostic::error(code, err.to_string())
     }
