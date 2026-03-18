@@ -66,12 +66,20 @@ impl IRBuilder {
             instructions: Vec::new(),
         });
 
-        // Allocate space for parameters
-        for (name, ty) in &params {
+        // Allocate space for parameters and store incoming values
+        for (i, (name, ty)) in params.iter().enumerate() {
+            // Parameter value (incoming argument)
+            let param_val = Value(format!("%param_{}", i));
+            // Pointer to store parameter
             let ptr = Value(format!("%{}", name));
+
             self.emit(Instruction::Alloca {
                 result: ptr.clone(),
                 ty: ty.clone(),
+            });
+            self.emit(Instruction::Store {
+                value: param_val,
+                ptr,
             });
         }
 
@@ -170,7 +178,10 @@ impl IRBuilder {
                 for stmt in then_block {
                     self.build_stmt(stmt);
                 }
-                self.emit(Instruction::Jump(end_label.clone()));
+                // Only emit jump if the block doesn't end with a terminator
+                if !self.last_instruction_is_terminator() {
+                    self.emit(Instruction::Jump(end_label.clone()));
+                }
 
                 self.emit(Instruction::Label(else_label));
                 if let Some(else_block) = else_block {
@@ -178,7 +189,10 @@ impl IRBuilder {
                         self.build_stmt(stmt);
                     }
                 }
-                self.emit(Instruction::Jump(end_label.clone()));
+                // Only emit jump if the block doesn't end with a terminator
+                if !self.last_instruction_is_terminator() {
+                    self.emit(Instruction::Jump(end_label.clone()));
+                }
 
                 self.emit(Instruction::Label(end_label));
             }
@@ -472,6 +486,12 @@ impl IRBuilder {
                     ],
                 });
 
+                // Track the type of the result variable
+                let result_type = self.get_expr_type_with_vars(then_expr)
+                    .or_else(|| self.get_expr_type_with_vars(else_expr))
+                    .unwrap_or(Type::Int);
+                self.variable_types.insert(result.0.clone(), result_type);
+
                 Some(result)
             }
             ExprKind::Move(inner) => self.build_expr(inner),
@@ -528,6 +548,16 @@ impl IRBuilder {
         if let Some(f) = &mut self.current_function {
             f.instructions.push(instr);
         }
+    }
+
+    /// Check if the last instruction is a terminator (Return, Jump, Branch)
+    fn last_instruction_is_terminator(&self) -> bool {
+        if let Some(ref func) = self.current_function {
+            if let Some(last) = func.instructions.last() {
+                return matches!(last, Instruction::Return(_) | Instruction::Jump(_) | Instruction::Branch { .. });
+            }
+        }
+        false
     }
 
     /// Handle println(expr) - prints value followed by newline
@@ -798,6 +828,19 @@ impl IRBuilder {
                 }
                 IRType::I64
             }
+            ExprKind::Conditional { condition: _, then_expr, else_expr } => {
+                // Infer type from branches
+                let then_type = self.infer_expr_type(then_expr);
+                let else_type = self.infer_expr_type(else_expr);
+                // Prefer then_type, but if it's I64 (default), try else_type
+                if then_type != IRType::I64 {
+                    then_type
+                } else if else_type != IRType::I64 {
+                    else_type
+                } else {
+                    IRType::I64
+                }
+            }
             _ => IRType::I64,
         }
     }
@@ -818,6 +861,17 @@ impl IRBuilder {
                     }
                 }
                 Type::Int
+            }
+            ExprKind::Conditional { condition: _, then_expr, else_expr } => {
+                let then_type = self.infer_ast_type(then_expr);
+                let else_type = self.infer_ast_type(else_expr);
+                if then_type != Type::Int {
+                    then_type
+                } else if else_type != Type::Int {
+                    else_type
+                } else {
+                    Type::Int
+                }
             }
             _ => Type::Int,
         }
@@ -847,7 +901,38 @@ impl IRBuilder {
                     _ => Some(Type::Int),
                 }
             }
+            ExprKind::Conditional { condition: _, then_expr, else_expr } => {
+                // The type of a conditional is the type of its branches
+                let then_type = self.get_expr_type_with_vars(then_expr);
+                let else_type = self.get_expr_type_with_vars(else_expr);
+                // Prefer then_type, fall back to else_type, then Int as default
+                then_type.or(else_type).or(Some(Type::Int))
+            }
+            ExprKind::Call { callee, args: _ } => {
+                // Look up the function return type
+                if let ExprKind::Ident(name) = &callee.kind {
+                    // Check if we've built this function
+                    for func in &self.module.functions {
+                        if func.name == *name {
+                            return Some(self.ir_type_to_type(&func.return_type));
+                        }
+                    }
+                }
+                None
+            }
             _ => None,
+        }
+    }
+
+    /// Convert IRType back to Type
+    fn ir_type_to_type(&self, ty: &IRType) -> Type {
+        match ty {
+            IRType::I64 => Type::Int,
+            IRType::F64 => Type::Float,
+            IRType::Bool => Type::Bool,
+            IRType::String => Type::String,
+            IRType::Void => Type::Void,
+            IRType::Ptr(_) => Type::String, // Treat pointers as strings for now
         }
     }
 

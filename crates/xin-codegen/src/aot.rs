@@ -181,11 +181,26 @@ impl AOTCodeGenerator {
             std::collections::HashMap::new();
         let mut var_counter = 0;
 
-        // Process parameters
-        for (name, _) in &func.params {
-            let var = Variable::new(var_counter);
+        // Process parameters - bind IR parameter values to Cranelift block params
+        for (i, (name, ty)) in func.params.iter().enumerate() {
+            // The IR uses %param_N for the incoming parameter value
+            let param_val_name = format!("%param_{}", i);
+            let param_var = Variable::new(var_counter);
             var_counter += 1;
-            variables.insert(name.clone(), var);
+            variables.insert(param_val_name.clone(), param_var);
+
+            // Get the block parameter value from Cranelift
+            let cranelift_ty = self.convert_type(ty);
+            let block_param = builder.block_params(entry_block)[i];
+            builder.declare_var(param_var, cranelift_ty);
+            builder.def_var(param_var, block_param);
+
+            // Also create a variable for the parameter name (used for variable lookup)
+            let name_var = Variable::new(var_counter);
+            var_counter += 1;
+            variables.insert(name.clone(), name_var);
+            builder.declare_var(name_var, cranelift_ty);
+            builder.def_var(name_var, block_param);
         }
 
         // Cache for function refs and global values
@@ -201,10 +216,46 @@ impl AOTCodeGenerator {
         let mut stored_cranelift_values: std::collections::HashMap<String, (cranelift::prelude::Value, Type)> =
             std::collections::HashMap::new();
 
+        // First pass: collect all labels and create blocks
+        let mut label_to_block: std::collections::HashMap<String, cranelift::codegen::ir::Block> =
+            std::collections::HashMap::new();
+        for instr in &func.instructions {
+            if let Instruction::Label(name) = instr {
+                let block = builder.create_block();
+                label_to_block.insert(name.clone(), block);
+            }
+        }
+
+        // Pre-process: collect Phi node information
+        // Map from label -> list of (result_var, incoming_value)
+        let mut phi_info: std::collections::HashMap<String, Vec<(String, String)>> =
+            std::collections::HashMap::new();
+        for instr in &func.instructions {
+            if let Instruction::Phi { result, incoming } = instr {
+                for (val, label) in incoming {
+                    phi_info.entry(label.clone())
+                        .or_default()
+                        .push((result.0.clone(), val.0.clone()));
+                }
+            }
+        }
+
+        // Store label_to_block and phi_info for use in compile_instruction
+        let label_to_block_ref = &label_to_block;
+        let phi_info_ref = &phi_info;
+
+        // Track current label (for phi handling)
+        let mut current_label: Option<String> = None;
+
         // Process instructions
         let func_name = &func.name;
         for instr in &func.instructions {
-            self.compile_instruction(
+            // Track current label for phi handling
+            if let Instruction::Label(name) = instr {
+                current_label = Some(name.clone());
+            }
+
+            self.compile_instruction_with_control_flow(
                 &mut builder,
                 instr,
                 func_name,
@@ -214,6 +265,9 @@ impl AOTCodeGenerator {
                 &mut global_value_cache,
                 &mut stack_slots,
                 &mut stored_cranelift_values,
+                label_to_block_ref,
+                phi_info_ref,
+                &current_label,
             )?;
         }
 
@@ -227,6 +281,93 @@ impl AOTCodeGenerator {
 
         self.module.clear_context(&mut ctx);
 
+        Ok(())
+    }
+
+    /// Compile a single instruction with control flow support
+    fn compile_instruction_with_control_flow(
+        &self,
+        builder: &mut FunctionBuilder,
+        instr: &Instruction,
+        func_name: &str,
+        variables: &mut std::collections::HashMap<String, Variable>,
+        var_counter: &mut usize,
+        func_ref_cache: &mut std::collections::HashMap<String, FuncRef>,
+        global_value_cache: &mut std::collections::HashMap<usize, GlobalValue>,
+        stack_slots: &mut std::collections::HashMap<String, cranelift::codegen::ir::StackSlot>,
+        stored_cranelift_values: &mut std::collections::HashMap<String, (cranelift::prelude::Value, Type)>,
+        label_to_block: &std::collections::HashMap<String, cranelift::codegen::ir::Block>,
+        phi_info: &std::collections::HashMap<String, Vec<(String, String)>>,
+        current_label: &Option<String>,
+    ) -> Result<(), String> {
+        match instr {
+            Instruction::Jump(target_label) => {
+                // Before jumping, define phi result variables for this predecessor
+                if let Some(label) = current_label {
+                    if let Some(phi_defs) = phi_info.get(label) {
+                        for (result_var, incoming_val) in phi_defs {
+                            // Load the incoming value
+                            let val = self.load_variable_by_name(builder, incoming_val, variables)?;
+                            // Get the type from the loaded value
+                            let val_type = builder.func.dfg.value_type(val);
+
+                            // Get or create the Variable for the result
+                            let var = if let Some(&existing_var) = variables.get(result_var) {
+                                existing_var
+                            } else {
+                                let new_var = Variable::new(*var_counter);
+                                *var_counter += 1;
+                                variables.insert(result_var.clone(), new_var);
+                                builder.declare_var(new_var, val_type);
+                                new_var
+                            };
+
+                            // Define the variable with this value
+                            builder.def_var(var, val);
+                        }
+                    }
+                }
+
+                if let Some(&target_block) = label_to_block.get(target_label) {
+                    builder.ins().jump(target_block, &[]);
+                }
+            }
+            Instruction::Branch { cond, then_label, else_label } => {
+                let cond_val = self.load_variable(builder, cond, variables)?;
+                // Compare with zero (false)
+                let zero = builder.ins().iconst(types::I64, 0);
+                let cond_i8 = builder.ins().icmp(
+                    cranelift::prelude::IntCC::NotEqual,
+                    cond_val,
+                    zero,
+                );
+                let then_block = *label_to_block.get(then_label)
+                    .ok_or_else(|| format!("Label {} not found", then_label))?;
+                let else_block = *label_to_block.get(else_label)
+                    .ok_or_else(|| format!("Label {} not found", else_label))?;
+                builder.ins().brif(cond_i8, then_block, &[], else_block, &[]);
+            }
+            Instruction::Label(name) => {
+                if let Some(&block) = label_to_block.get(name) {
+                    builder.switch_to_block(block);
+                    builder.seal_block(block);
+                }
+            }
+            _ => {
+                // Handle other instructions using the original method
+                self.compile_instruction(
+                    builder,
+                    instr,
+                    func_name,
+                    variables,
+                    var_counter,
+                    func_ref_cache,
+                    global_value_cache,
+                    stack_slots,
+                    stored_cranelift_values,
+                )?;
+            }
+        }
         Ok(())
     }
 
@@ -415,20 +556,25 @@ impl AOTCodeGenerator {
                 // Store result if any
                 if let Some(result) = result {
                     // Get the return value (first return value)
-                    let ret_val = builder.inst_results(call_val)[0];
+                    let results = builder.inst_results(call_val);
+                    if !results.is_empty() {
+                        let ret_val = results[0];
 
-                    // Get return type from function signature
-                    let sig = self.func_sigs.get(func_name)
-                        .ok_or_else(|| format!("Signature not found for function {}", func_name))?;
-                    let ret_type = sig.returns.first()
-                        .map(|p| p.value_type)
-                        .unwrap_or(types::I64);
+                        // Get return type from function signature
+                        let sig = self.func_sigs.get(func_name)
+                            .ok_or_else(|| format!("Signature not found for function {}", func_name))?;
+                        let ret_type = sig.returns.first()
+                            .map(|p| p.value_type)
+                            .unwrap_or(types::I64);
 
-                    self.store_variable(builder, result, ret_val, variables, var_counter, ret_type);
+                        self.store_variable(builder, result, ret_val, variables, var_counter, ret_type);
+                    }
                 }
             }
+            // Jump, Branch, and Label are handled in compile_instruction_with_control_flow
+            // but we need to handle them here for completeness
             Instruction::Jump(_) | Instruction::Branch { .. } | Instruction::Label(_) => {
-                // TODO: Implement control flow
+                // Already handled in compile_instruction_with_control_flow
             }
             Instruction::Alloca { result, ty } => {
                 // Create a stack slot for the variable
@@ -481,8 +627,18 @@ impl AOTCodeGenerator {
                     self.store_variable(builder, result, val, variables, var_counter, types::I64);
                 }
             }
-            Instruction::Phi { .. } => {
-                // TODO: Implement phi nodes
+            Instruction::Phi { result, incoming: _ } => {
+                // Phi node: we need to declare the result variable if not already declared.
+                // The actual values are set in each predecessor block's Jump instruction.
+                // Check if the variable already exists (it might have been defined in predecessor jumps)
+                if !variables.contains_key(&result.0) {
+                    // Declare with a placeholder type - will be re-typed when first defined
+                    let var = Variable::new(*var_counter);
+                    *var_counter += 1;
+                    variables.insert(result.0.clone(), var);
+                    // Don't call declare_var here as we don't know the type yet
+                    // The type will be set when def_var is called in the predecessor blocks
+                }
             }
             Instruction::StringConcat { result, left, left_type, right, right_type } => {
                 // Determine which runtime function to call
@@ -571,6 +727,38 @@ impl AOTCodeGenerator {
             // Return a default value for undefined variables
             Ok(builder.ins().iconst(types::I64, 0))
         }
+    }
+
+    /// Load a variable by name (string)
+    fn load_variable_by_name(
+        &self,
+        builder: &mut FunctionBuilder,
+        name: &str,
+        variables: &std::collections::HashMap<String, Variable>,
+    ) -> Result<Value, String> {
+        if let Some(var) = variables.get(name) {
+            Ok(builder.use_var(*var))
+        } else {
+            // Return a default value for undefined variables
+            Ok(builder.ins().iconst(types::I64, 0))
+        }
+    }
+
+    /// Store a variable by name (string)
+    fn store_variable_by_name(
+        &self,
+        builder: &mut FunctionBuilder,
+        name: &str,
+        value: Value,
+        variables: &mut std::collections::HashMap<String, Variable>,
+        var_counter: &mut usize,
+        ty: Type,
+    ) {
+        let var = Variable::new(*var_counter);
+        *var_counter += 1;
+        variables.insert(name.to_string(), var);
+        builder.declare_var(var, ty);
+        builder.def_var(var, value);
     }
 
     fn store_variable(

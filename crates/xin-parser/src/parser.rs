@@ -366,23 +366,7 @@ impl Parser {
         let span = self.span_from(self.peek().line, self.peek().column);
         self.consume(TokenKind::If, "expected 'if'")?;
 
-        let condition = self.parse_expr()?;
-
-        self.consume(TokenKind::LBrace, "expected '{'")?;
-        let then_block = self.parse_block()?;
-
-        let else_block = if self.match_kind(TokenKind::Else) {
-            if self.match_kind(TokenKind::If) {
-                // else if
-                let stmt = self.parse_if_stmt()?;
-                Some(vec![stmt])
-            } else {
-                self.consume(TokenKind::LBrace, "expected '{'")?;
-                Some(self.parse_block()?)
-            }
-        } else {
-            None
-        };
+        let (condition, then_block, else_block) = self.parse_if_body(span.clone())?;
 
         Ok(Stmt::new(
             StmtKind::If {
@@ -392,6 +376,37 @@ impl Parser {
             },
             span,
         ))
+    }
+
+    /// Parse the body of an if statement (condition, then block, optional else)
+    /// Used by both parse_if_stmt and else if handling
+    fn parse_if_body(&mut self, span: SourceSpan) -> Result<(Expr, Vec<Stmt>, Option<Vec<Stmt>>), ParserError> {
+        let condition = self.parse_expr()?;
+        self.consume(TokenKind::LBrace, "expected '{'")?;
+        let then_block = self.parse_block()?;
+
+        let else_block = if self.match_kind(TokenKind::Else) {
+            if self.match_kind(TokenKind::If) {
+                // else if - recursively parse the next if
+                let inner_span = self.span_from(self.peek().line, self.peek().column);
+                let (inner_cond, inner_then, inner_else) = self.parse_if_body(inner_span)?;
+                Some(vec![Stmt::new(
+                    StmtKind::If {
+                        condition: inner_cond,
+                        then_block: inner_then,
+                        else_block: inner_else,
+                    },
+                    span,
+                )])
+            } else {
+                self.consume(TokenKind::LBrace, "expected '{'")?;
+                Some(self.parse_block()?)
+            }
+        } else {
+            None
+        };
+
+        Ok((condition, then_block, else_block))
     }
 
     fn parse_for_stmt(&mut self) -> Result<Stmt, ParserError> {
@@ -598,6 +613,7 @@ impl Parser {
     fn parse_elvis(&mut self) -> Result<Expr, ParserError> {
         let mut expr = self.parse_or()?;
 
+        // Elvis operator (??)
         while self.match_kind(TokenKind::QuestionQuestion) {
             let right = self.parse_or()?;
             let span = expr.span.clone();
@@ -605,6 +621,23 @@ impl Parser {
                 ExprKind::Elvis {
                     left: Box::new(expr),
                     right: Box::new(right),
+                },
+                span,
+            );
+        }
+
+        // Ternary conditional (condition ? then : else)
+        // This has lower precedence than comparison operators
+        if self.match_kind(TokenKind::Question) {
+            let then_expr = self.parse_expr()?;
+            self.consume(TokenKind::Colon, "expected ':'")?;
+            let else_expr = self.parse_elvis()?; // Right-associative
+            let span = expr.span.clone();
+            expr = Expr::new(
+                ExprKind::Conditional {
+                    condition: Box::new(expr),
+                    then_expr: Box::new(then_expr),
+                    else_expr: Box::new(else_expr),
                 },
                 span,
             );
@@ -859,21 +892,7 @@ impl Parser {
             }
         }
 
-        // Ternary conditional
-        if self.match_kind(TokenKind::Question) {
-            let then_expr = self.parse_expr()?;
-            self.consume(TokenKind::Colon, "expected ':'")?;
-            let else_expr = self.parse_expr()?;
-            let span = expr.span.clone();
-            expr = Expr::new(
-                ExprKind::Conditional {
-                    condition: Box::new(expr),
-                    then_expr: Box::new(then_expr),
-                    else_expr: Box::new(else_expr),
-                },
-                span,
-            );
-        }
+        // Ternary conditional is now handled in parse_elvis
 
         Ok(expr)
     }
