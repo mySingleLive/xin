@@ -6,6 +6,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdarg.h>
+#include <stdint.h>
 
 // Integer print
 void xin_print_int(long long n) {
@@ -252,8 +253,6 @@ void xin_printf_3_ss(const char* fmt, const char* a1, const char* a2) {
 
 // ========== Array Runtime ==========
 
-#include <stdint.h>
-
 // 数组结构
 typedef struct {
     void** data;        // 元素指针数组
@@ -267,7 +266,7 @@ xin_array* xin_array_new(int64_t capacity) {
     if (!arr) return NULL;
 
     arr->data = (void**)calloc(capacity > 0 ? capacity : 4, sizeof(void*));
-    if (!arr->data && capacity > 0) {
+    if (!arr->data) {
         free(arr);
         return NULL;
     }
