@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 use xin_ast::Type;
-use xin_diagnostics::{Diagnostic, DiagnosticCode};
+use xin_diagnostics::{Diagnostic, DiagnosticCode, SourceSpan};
 
 #[derive(Error, Debug)]
 pub enum SemanticError {
@@ -47,6 +47,9 @@ pub enum SemanticError {
 
     #[error("printf argument type mismatch: expected '{expected:?}', found '{found:?}'")]
     PrintfArgumentTypeMismatch { expected: Type, found: Type },
+
+    #[error("cannot convert type '{ty}' to string")]
+    CannotConvertToString { ty: Type, span: SourceSpan },
 }
 
 impl From<SemanticError> for Diagnostic {
@@ -66,6 +69,7 @@ impl From<SemanticError> for Diagnostic {
             SemanticError::InvalidFormatSpecifier(_) => DiagnosticCode::S002,
             SemanticError::PrintfArgumentCountMismatch { .. } => DiagnosticCode::S002,
             SemanticError::PrintfArgumentTypeMismatch { .. } => DiagnosticCode::S002,
+            SemanticError::CannotConvertToString { .. } => DiagnosticCode::S002,
         };
         Diagnostic::error(code, err.to_string())
     }

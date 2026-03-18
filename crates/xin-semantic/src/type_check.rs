@@ -1,7 +1,7 @@
 //! Type checking
 
 use xin_ast::*;
-use xin_diagnostics::Diagnostic;
+use xin_diagnostics::{Diagnostic, SourceSpan};
 
 use crate::{ScopeStack, SemanticError, Symbol, SymbolKind};
 
@@ -946,6 +946,10 @@ impl TypeChecker {
                 // For MVP, allow all casts (runtime will handle)
                 Ok(target_type.clone())
             }
+
+            ExprKind::TemplateLiteral(parts) => {
+                self.check_template_literal(parts, &expr.span)
+            }
         }
     }
 
@@ -1002,6 +1006,25 @@ impl TypeChecker {
             }
             _ => false,
         }
+    }
+
+    fn check_template_literal(&mut self, parts: &[TemplatePart], span: &SourceSpan) -> Result<Type, SemanticError> {
+        for part in parts {
+            if let TemplatePart::Expr(expr) = part {
+                let ty = self.check_expr(expr)?;
+                if !self.is_stringifiable(&ty) {
+                    return Err(SemanticError::CannotConvertToString {
+                        ty,
+                        span: *span,
+                    });
+                }
+            }
+        }
+        Ok(Type::String)
+    }
+
+    fn is_stringifiable(&self, ty: &Type) -> bool {
+        matches!(ty, Type::Int | Type::Float | Type::Bool | Type::String)
     }
 
     /// Parse printf format string and return expected types
