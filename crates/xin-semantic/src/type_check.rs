@@ -625,7 +625,7 @@ impl TypeChecker {
             ExprKind::MethodCall { object, method, args } => {
                 let obj_type = self.check_expr(object)?;
 
-                // Handle array methods (push, pop)
+                // Handle array methods (push, pop, len)
                 if matches!(&obj_type, Type::Array(_)) {
                     match method.as_str() {
                         "push" | "pop" => {
@@ -671,6 +671,16 @@ impl TypeChecker {
                                 _ => {}
                             }
                             return Ok(Type::Void);
+                        }
+                        "len" => {
+                            // len takes no arguments and returns int
+                            if !args.is_empty() {
+                                return Err(SemanticError::WrongNumberOfArguments {
+                                    expected: 0,
+                                    found: args.len(),
+                                });
+                            }
+                            return Ok(Type::Int);
                         }
                         _ => {}
                     }

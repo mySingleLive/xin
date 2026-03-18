@@ -1,10 +1,10 @@
 // tests/arrays/mutable.xin
-// Tests mutable array with push operation
+// Tests mutable array operations
 func main() {
     let arr: mut int[] = [1, 2, 3]
+    arr[0] = 10
     arr.push(4)
-    println(arr[0])
-    println(arr[1])
-    println(arr[2])
-    println(arr[3])
+    println(arr[0])   // 10
+    println(arr[3])   // 4
+    println(arr.len()) // 4
 }

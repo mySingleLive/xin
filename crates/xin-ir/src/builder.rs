@@ -508,6 +508,15 @@ impl IRBuilder {
                         let ptr = Value(format!("%{}", name));
                         self.emit(Instruction::Store { value: val.clone(), ptr });
                     }
+                    ExprKind::Index { object, index } => {
+                        let obj_val = self.build_expr(object)?;
+                        let idx_val = self.build_expr(index)?;
+                        self.emit(Instruction::ArraySet {
+                            array: obj_val,
+                            index: idx_val,
+                            value: val.clone(),
+                        });
+                    }
                     _ => {}
                 }
                 Some(val)
