@@ -271,6 +271,11 @@ impl AOTCodeGenerator {
             )?;
         }
 
+        // Seal all blocks now that all predecessors are known
+        for block in label_to_block.values() {
+            builder.seal_block(*block);
+        }
+
         builder.finalize();
 
         self.module
@@ -350,7 +355,8 @@ impl AOTCodeGenerator {
             Instruction::Label(name) => {
                 if let Some(&block) = label_to_block.get(name) {
                     builder.switch_to_block(block);
-                    builder.seal_block(block);
+                    // Don't seal immediately - we'll seal all blocks at the end
+                    // This allows Cranelift to properly handle back-edges in loops
                 }
             }
             _ => {
@@ -606,12 +612,34 @@ impl AOTCodeGenerator {
                     let addr = builder.ins().stack_addr(self.pointer_type, slot, 0);
                     builder.ins().store(cranelift::codegen::ir::MemFlags::trusted(), val, addr, 0);
                 }
+
+                // For loop variables: define a Cranelift variable for the pointer
+                // This allows use_var to get the correct value with phi nodes in loops
+                let ptr_name = &ptr.0;
+                if let Some(&existing_var) = variables.get(ptr_name) {
+                    // Reuse existing variable - Cranelift will handle phi nodes
+                    builder.def_var(existing_var, val);
+                } else {
+                    // Create new variable for this storage location
+                    let var = Variable::new(*var_counter);
+                    *var_counter += 1;
+                    variables.insert(ptr_name.clone(), var);
+                    builder.declare_var(var, val_type);
+                    builder.def_var(var, val);
+                }
             }
             Instruction::Load { result, ptr } => {
-                // Try to load from stored values first
-                if let Some((val, val_type)) = stored_cranelift_values.get(&ptr.0) {
+                let ptr_name = &ptr.0;
+
+                // First, try to use Cranelift variable (handles loops with phi nodes)
+                if let Some(&var) = variables.get(ptr_name) {
+                    let val = builder.use_var(var);
+                    let val_type = builder.func.dfg.value_type(val);
+                    self.store_variable(builder, result, val, variables, var_counter, val_type);
+                } else if let Some((val, val_type)) = stored_cranelift_values.get(ptr_name) {
+                    // Fallback to stored values
                     self.store_variable(builder, result, *val, variables, var_counter, *val_type);
-                } else if let Some(&slot) = stack_slots.get(&ptr.0) {
+                } else if let Some(&slot) = stack_slots.get(ptr_name) {
                     // Load from stack slot
                     let addr = builder.ins().stack_addr(self.pointer_type, slot, 0);
                     let val = builder.ins().load(

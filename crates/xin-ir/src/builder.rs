@@ -207,6 +207,10 @@ impl IRBuilder {
                         let body_label = self.new_label();
                         let end_label = self.new_label();
 
+                        // Jump from entry block to loop condition check
+                        if !self.last_instruction_is_terminator() {
+                            self.emit(Instruction::Jump(cond_label.clone()));
+                        }
                         self.emit(Instruction::Label(cond_label.clone()));
 
                         if let Some(cond) = condition {
@@ -216,6 +220,9 @@ impl IRBuilder {
                                 then_label: body_label.clone(),
                                 else_label: end_label.clone(),
                             });
+                        } else {
+                            // No condition means infinite loop - jump directly to body
+                            self.emit(Instruction::Jump(body_label.clone()));
                         }
 
                         self.emit(Instruction::Label(body_label));
@@ -242,6 +249,10 @@ impl IRBuilder {
                         let body_label = self.new_label();
                         let end_label = self.new_label();
 
+                        // Jump from entry block to loop condition check
+                        if !self.last_instruction_is_terminator() {
+                            self.emit(Instruction::Jump(cond_label.clone()));
+                        }
                         self.emit(Instruction::Label(cond_label.clone()));
                         let cond_val = self.build_expr(condition).unwrap();
                         self.emit(Instruction::Branch {
@@ -260,6 +271,10 @@ impl IRBuilder {
                     }
                     xin_ast::ForLoop::Infinite { body } => {
                         let body_label = self.new_label();
+                        // Jump from entry block to loop body
+                        if !self.last_instruction_is_terminator() {
+                            self.emit(Instruction::Jump(body_label.clone()));
+                        }
                         self.emit(Instruction::Label(body_label.clone()));
                         for stmt in body {
                             self.build_stmt(stmt);

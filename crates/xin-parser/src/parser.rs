@@ -441,75 +441,119 @@ impl Parser {
             }
 
             // C-style for or while-style
-            let init = if !self.check(TokenKind::Semicolon) {
-                Some(Box::new(self.parse_stmt()?))
-            } else {
-                self.advance(); // consume ';'
-                None
-            };
+            // First, try to determine the type of for loop by looking at the structure
+            // If it starts with 'let', 'var', or ':=' -> C-style with init
+            // Otherwise, parse expression and check if followed by ';' or ')'
 
-            if self.match_kind(TokenKind::RParen) {
-                // for (init) or for () with no condition
-                self.consume(TokenKind::LBrace, "expected '{'")?;
-                let body = self.parse_block()?;
-                // If there's no init, treat as infinite loop; otherwise treat as C-style with no condition
-                if init.is_some() {
+            let is_init_stmt = matches!(
+                self.peek().kind,
+                TokenKind::Let | TokenKind::Var | TokenKind::ColonColon
+            );
+
+            if is_init_stmt {
+                // C-style for loop with init
+                let init = Some(Box::new(self.parse_stmt()?));
+
+                self.consume(TokenKind::Semicolon, "expected ';' after for init")?;
+
+                let condition = if !self.check(TokenKind::Semicolon) && !self.check(TokenKind::RParen) {
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+
+                if self.match_kind(TokenKind::RParen) {
+                    // for (init; condition) - C-style with no update
+                    self.consume(TokenKind::LBrace, "expected '{'")?;
+                    let body = self.parse_block()?;
                     return Ok(Stmt::new(
                         StmtKind::For(ForLoop::CStyle {
                             init,
-                            condition: None,
+                            condition,
                             update: None,
                             body,
                         }),
                         span,
                     ));
-                } else {
-                    return Ok(Stmt::new(
-                        StmtKind::For(ForLoop::Infinite { body }),
-                        span,
-                    ));
                 }
-            }
 
-            let condition = if !self.check(TokenKind::Semicolon) {
-                Some(self.parse_expr()?)
-            } else {
-                None
-            };
-
-            if self.match_kind(TokenKind::RParen) {
-                // for (init; condition) - C-style with no update
+                self.consume(TokenKind::Semicolon, "expected ';' after for condition")?;
+                let update = if !self.check(TokenKind::RParen) {
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+                self.consume(TokenKind::RParen, "expected ')'")?;
                 self.consume(TokenKind::LBrace, "expected '{'")?;
                 let body = self.parse_block()?;
                 return Ok(Stmt::new(
                     StmtKind::For(ForLoop::CStyle {
                         init,
                         condition,
-                        update: None,
+                        update,
+                        body,
+                    }),
+                    span,
+                ));
+            } else {
+                // Could be while-style for (condition) or C-style without init
+                let first_expr = self.parse_expr()?;
+
+                if self.match_kind(TokenKind::RParen) {
+                    // while-style: for (condition) { }
+                    self.consume(TokenKind::LBrace, "expected '{'")?;
+                    let body = self.parse_block()?;
+                    return Ok(Stmt::new(
+                        StmtKind::For(ForLoop::While {
+                            condition: first_expr,
+                            body,
+                        }),
+                        span,
+                    ));
+                }
+
+                // C-style without init: for (; condition; update) or for (; condition)
+                self.consume(TokenKind::Semicolon, "expected ';' or ')'")?;
+
+                let condition = if !self.check(TokenKind::Semicolon) && !self.check(TokenKind::RParen) {
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+
+                if self.match_kind(TokenKind::RParen) {
+                    self.consume(TokenKind::LBrace, "expected '{'")?;
+                    let body = self.parse_block()?;
+                    return Ok(Stmt::new(
+                        StmtKind::For(ForLoop::CStyle {
+                            init: None,
+                            condition,
+                            update: None,
+                            body,
+                        }),
+                        span,
+                    ));
+                }
+
+                self.consume(TokenKind::Semicolon, "expected ';'")?;
+                let update = if !self.check(TokenKind::RParen) {
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+                self.consume(TokenKind::RParen, "expected ')'")?;
+                self.consume(TokenKind::LBrace, "expected '{'")?;
+                let body = self.parse_block()?;
+                return Ok(Stmt::new(
+                    StmtKind::For(ForLoop::CStyle {
+                        init: None,
+                        condition,
+                        update,
                         body,
                     }),
                     span,
                 ));
             }
-
-            self.consume(TokenKind::Semicolon, "expected ';'")?;
-            let update = if !self.check(TokenKind::RParen) {
-                Some(self.parse_expr()?)
-            } else {
-                None
-            };
-            self.consume(TokenKind::RParen, "expected ')'")?;
-            self.consume(TokenKind::LBrace, "expected '{'")?;
-            let body = self.parse_block()?;
-            return Ok(Stmt::new(
-                StmtKind::For(ForLoop::CStyle {
-                    init,
-                    condition,
-                    update,
-                    body,
-                }),
-                span,
-            ));
         }
 
         // for condition { } - while-style without parens

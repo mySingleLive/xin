@@ -3,13 +3,13 @@
 
 func main() {
     // C-style for loop
-    for (let i = 0; i < 5; i = i + 1) {
+    for (var i = 0; i < 5; i = i + 1) {
         println(i)
     }
     println("count: 5")
 
     // While-style for loop
-    let j = 5
+    var j = 5
     for (j > 0) {
         println(j)
         j = j - 1
@@ -17,7 +17,7 @@ func main() {
     println("done")
 
     // Infinite loop with break (requires break implementation)
-    // let k = 0
+    // var k = 0
     // for {
     //     k = k + 1
     //     if (k > 3) {

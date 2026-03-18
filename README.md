@@ -86,8 +86,8 @@ func main() {
 | `basic/` | ✅ 启用 | 基础功能：算术运算、变量、类型 |
 | `strings/` | ✅ 启用 | 字符串操作：拼接、printf |
 | `operators/` | ✅ 启用 | 运算符：比较、一元运算 |
-| `control_flow/` | ⏳ 待启用 | 控制流：if/else、循环 |
-| `functions/` | ⏳ 待启用 | 函数：参数、返回值、递归 |
+| `control_flow/` | ✅ 启用 | 控制流：if/else、循环 |
+| `functions/` | ✅ 启用 | 函数：参数、返回值、递归 |
 
 ### 添加新测试
 
