@@ -67,7 +67,34 @@ let c = []                  // object[]
 let d: string[] = []        // string[]
 ```
 
-### 3.3 可变性检查
+### 3.3 类型兼容性规则
+
+**基本规则**：类型必须完全匹配，不支持协变或逆变。
+
+```xin
+let a: int[] = [1, 2, 3]
+let b: object[] = a    // ✗ 错误：int[] 不能赋值给 object[]
+let c: object[] = [1, "a"]  // ✓ 正确：字面量推断为 object[]
+```
+
+**可变性规则**：
+
+| 源类型 | 目标类型 | 是否允许 |
+|--------|---------|---------|
+| `T[]` | `T[]` | ✓ |
+| `mut T[]` | `T[]` | ✓ (丢弃可变性) |
+| `T[]` | `mut T[]` | ✗ |
+| `mut T[]` | `mut T[]` | ✓ |
+
+**嵌套可变性**：可变性只影响顶层数组，不影响嵌套数组。
+
+```xin
+let matrix: mut int[][] = [[1, 2], [3, 4]]
+matrix[0] = [5, 6]       // ✓ 外层可变
+matrix[0][0] = 10        // ✗ 内层不可变 (int[][] 非 mut int[][])
+```
+
+### 3.4 可变性检查
 
 | 操作 | `T[]` (不可变) | `mut T[]` (可变) |
 |------|---------------|-----------------|
@@ -76,6 +103,16 @@ let d: string[] = []        // string[]
 | push | ✗ | ✓ |
 | pop | ✗ | ✓ |
 | len | ✓ | ✓ |
+
+### 3.5 数组方法签名
+
+| 方法 | 签名 | 返回类型 | 说明 |
+|------|------|---------|------|
+| `push` | `arr.push(value: T)` | `void` | 追加元素 |
+| `pop` | `arr.pop()` | `T` | 弹出最后一个元素 |
+| `len` | `arr.len()` | `int` | 返回数组长度 |
+
+方法在类型系统中作为内置方法处理，不需要显式定义 trait。
 
 ## 4. AST 表示
 
@@ -97,10 +134,16 @@ Array(Box<Type>),                  // 数组类型
 
 pub enum Type {
     // ... 现有类型
-    /// object 类型，表示任意类型
+    /// object 类型，表示任意类型的运行时值
+    /// 用于混合类型数组的元素类型
     Object,
 }
 ```
+
+**Object 类型语义**：
+- `Object` 是顶级类型，可以接受任何值
+- 主要用于 `object[]` 数组的元素类型
+- 运行时通过 `elem_type` 标记区分实际类型
 
 ### 4.3 类型可变性
 
@@ -198,13 +241,51 @@ fn check_index_access(&mut self, object: &Expr, index: &Expr) -> Result<Type, Se
 
 **可变性检查**：
 
+通过作用域查找变量的可变性标记：
+
 ```rust
-fn check_method_call(&mut self, object: &Expr, method: &str, is_mutable: bool) -> Result<Type, SemanticError> {
-    match method {
-        "push" | "pop" if !is_mutable => {
-            Err(SemanticError::ImmutableArrayModification(method.to_string()))
+fn check_method_call(&mut self, object: &Expr, method: &str) -> Result<Type, SemanticError> {
+    // 从表达式中提取变量名
+    if let ExprKind::Ident(name) = &object.kind {
+        // 从作用域查找变量的可变性
+        let symbol = self.scopes.lookup(name)?;
+        let is_mutable = symbol.is_mutable();
+
+        match method {
+            "push" | "pop" if !is_mutable => {
+                return Err(SemanticError::ImmutableArrayModification {
+                    method: method.to_string(),
+                    span: object.span.clone(),
+                });
+            }
+            _ => {}
         }
-        _ => Ok(/* ... */)
+    }
+
+    // 执行类型检查
+    let obj_type = self.check_expr(object)?;
+    // ...
+}
+```
+
+**索引赋值可变性检查**：
+
+```rust
+fn check_assignment(&mut self, target: &Expr, value: &Expr) -> Result<Type, SemanticError> {
+    match &target.kind {
+        ExprKind::Index { object, index: _ } => {
+            // 检查 object 是否可变
+            if let ExprKind::Ident(name) = &object.kind {
+                let symbol = self.scopes.lookup(name)?;
+                if !symbol.is_mutable() {
+                    return Err(SemanticError::ImmutableArrayModification {
+                        method: "index assignment".to_string(),
+                        span: target.span.clone(),
+                    });
+                }
+            }
+        }
+        // ... 其他情况
     }
 }
 ```
@@ -323,6 +404,8 @@ fn compile_instruction(&mut self, inst: &Instruction, ...) -> Result<(), Codegen
 
 ### 5.6 Runtime 层
 
+> **设计说明**：当前实现使用 `void**` 统一存储所有类型，简化实现。未来可优化为根据元素类型使用不同的存储策略（如 `int[]` 使用连续内存存储）。
+
 ```c
 // runtime/runtime.c
 
@@ -338,11 +421,14 @@ fn compile_instruction(&mut self, inst: &Instruction, ...) -> Result<(), Codegen
 #define XIN_TYPE_OBJECT 4
 
 // 数组结构
+// 注意：当前使用 void** 存储，每个元素都是指针
+// 对于 int[] 等基本类型数组，这会增加内存开销
+// 未来优化：使用 union 或类型特化存储
 typedef struct {
-    void** data;
-    int64_t length;
-    int64_t capacity;
-    int8_t elem_type;
+    void** data;        // 元素指针数组
+    int64_t length;     // 当前长度
+    int64_t capacity;   // 容量
+    int8_t elem_type;   // 元素类型标记
 } xin_array;
 
 // 创建数组
@@ -413,9 +499,31 @@ int64_t xin_array_len(xin_array* arr) {
 }
 ```
 
-## 6. 错误处理
+## 6. 内存管理
 
-### 6.1 错误类型
+### 6.1 生命周期
+
+数组在堆上动态分配，生命周期遵循以下规则：
+
+1. **创建**：数组字面量或 `xin_array_new` 创建时分配
+2. **使用**：函数内创建的数组在函数执行期间有效
+3. **释放**：当前实现不自动释放，依赖程序退出时操作系统回收
+
+### 6.2 所有权语义（简化版本）
+
+当前实现采用简化策略：
+- 数组元素存储指针/值拷贝
+- 不追踪所有权转移
+- 不自动释放内存
+
+未来可扩展：
+- 添加 `drop(arr)` 显式释放
+- 实现引用计数或 GC
+- 所有权系统
+
+## 7. 错误处理
+
+### 7.1 错误类型与代码
 
 ```rust
 // crates/xin-semantic/src/error.rs
@@ -423,25 +531,42 @@ int64_t xin_array_len(xin_array* arr) {
 pub enum SemanticError {
     // ... 现有错误
 
-    /// 类型不可索引
-    NotIndexable(Type),
-    /// 不可变数组修改
-    ImmutableArrayModification(String),
-    /// 类型不匹配（数组元素）
-    ArrayElementTypeMismatch { expected: Type, actual: Type, index: usize },
+    /// S004: 类型不可索引
+    NotIndexable { ty: Type, span: SourceSpan },
+
+    /// S005: 不可变数组修改
+    ImmutableArrayModification { method: String, span: SourceSpan },
+
+    /// S006: 数组元素类型不匹配
+    ArrayElementTypeMismatch {
+        expected: Type,
+        actual: Type,
+        index: usize,
+        span: SourceSpan,
+    },
 }
 ```
 
-### 6.2 错误信息示例
+### 7.2 边界情况处理
+
+| 情况 | 处理方式 | 检测阶段 |
+|------|---------|---------|
+| 负数索引 | 运行时检查，panic | 运行时 |
+| 非整数索引 | 编译时报类型错误 | 语义分析 |
+| 嵌套索引赋值 `matrix[0][1] = 5` | 检查每层可变性 | 语义分析 |
+| `pop()` 空数组 | 运行时 panic | 运行时 |
+| 空数组 `len()` | 返回 0 | 正常 |
+
+### 7.3 错误信息示例
 
 ```
-error: type `int` is not indexable
+error[S004]: type `int` is not indexable
   --> main.xin:3:10
    |
 3  |     let x = 10[0]
    |            ^^^^^ type `int` does not support indexing
 
-error: cannot modify immutable array
+error[S005]: cannot modify immutable array
   --> main.xin:5:5
    |
 5  |     arr[0] = 1
@@ -449,7 +574,7 @@ error: cannot modify immutable array
    |
    = help: declare as `mut int[]` to allow modification
 
-error: array element type mismatch
+error[S006]: array element type mismatch
   --> main.xin:2:20
    |
 2  |     let arr: int[] = [1, "a"]
@@ -458,9 +583,9 @@ error: array element type mismatch
 runtime error: ArrayIndexOutOfBoundsError: index 5 out of bounds for length 3
 ```
 
-## 7. 测试用例
+## 8. 测试用例
 
-### 7.1 E2E 测试
+### 8.1 E2E 测试
 
 ```xin
 // tests/arrays/basic.xin
@@ -499,7 +624,7 @@ func main() {
 }
 ```
 
-### 7.2 运行时错误测试
+### 8.2 运行时错误测试
 
 ```xin
 // tests/arrays/out_of_bounds.xin
@@ -509,7 +634,7 @@ func main() {
 }
 ```
 
-## 8. 实现步骤
+## 9. 实现步骤
 
 1. **AST**：添加 `Type::Object`
 2. **Parser**：解析 `mut T[]` 类型语法
@@ -519,7 +644,7 @@ func main() {
 6. **Runtime**：实现数组操作函数
 7. **Tests**：添加 E2E 测试
 
-## 9. 未来扩展
+## 10. 未来扩展
 
 - 数组切片：`arr[1:3]`
 - 数组推导式：`[x * 2 for x in arr]`
