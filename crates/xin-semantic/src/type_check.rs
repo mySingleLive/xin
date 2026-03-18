@@ -160,6 +160,7 @@ impl TypeChecker {
                 param.mutable,
                 param.type_annotation.clone(),
                 self.scopes.current_level(),
+                false, // function params are not object_mutable by default
             );
             self.scopes.define(&param.name, symbol);
         }
@@ -240,6 +241,7 @@ impl TypeChecker {
                         var.mutable,
                         var_type,
                         self.scopes.current_level(),
+                        var.object_mutable,
                     );
                     self.scopes.define(&var.name, symbol);
                 } else if let Some(ty) = &var.type_annotation {
@@ -249,6 +251,7 @@ impl TypeChecker {
                         var.mutable,
                         ty.clone(),
                         self.scopes.current_level(),
+                        var.object_mutable,
                     );
                     self.scopes.define(&var.name, symbol);
                 }
@@ -336,6 +339,7 @@ impl TypeChecker {
                             true,
                             elem_type,
                             self.scopes.current_level(),
+                            false, // loop variable is not object_mutable
                         );
                         self.scopes.define(var_name, symbol);
 
@@ -621,6 +625,57 @@ impl TypeChecker {
             ExprKind::MethodCall { object, method, args } => {
                 let obj_type = self.check_expr(object)?;
 
+                // Handle array methods (push, pop)
+                if matches!(&obj_type, Type::Array(_)) {
+                    match method.as_str() {
+                        "push" | "pop" => {
+                            // Check mutability - need to look up the variable
+                            if let ExprKind::Ident(name) = &object.kind {
+                                if let Some(symbol) = self.scopes.lookup(name) {
+                                    if !symbol.is_object_mutable() {
+                                        return Err(SemanticError::ImmutableArrayModification {
+                                            method: method.clone(),
+                                            span: object.span,
+                                        });
+                                    }
+                                }
+                            }
+                            // push takes one argument, pop takes none
+                            match method.as_str() {
+                                "push" => {
+                                    if args.len() != 1 {
+                                        return Err(SemanticError::WrongNumberOfArguments {
+                                            expected: 1,
+                                            found: args.len(),
+                                        });
+                                    }
+                                    // Type check the argument
+                                    if let Type::Array(inner) = &obj_type {
+                                        let arg_type = self.check_expr(&args[0])?;
+                                        if !self.types_compatible(inner, &arg_type) {
+                                            return Err(SemanticError::TypeMismatch {
+                                                expected: (**inner).clone(),
+                                                found: arg_type,
+                                            });
+                                        }
+                                    }
+                                }
+                                "pop" => {
+                                    if !args.is_empty() {
+                                        return Err(SemanticError::WrongNumberOfArguments {
+                                            expected: 0,
+                                            found: args.len(),
+                                        });
+                                    }
+                                }
+                                _ => {}
+                            }
+                            return Ok(Type::Void);
+                        }
+                        _ => {}
+                    }
+                }
+
                 // Look up method in struct
                 let type_name = match &obj_type {
                     Type::Named(name) => name.clone(),
@@ -628,7 +683,7 @@ impl TypeChecker {
                         Type::Named(name) => name.clone(),
                         _ => return Err(SemanticError::UndefinedType(format!("{:?}", obj_type))),
                     },
-                    _ => return Err(SemanticError::UndefinedType(format!("{:?}", obj_type))),
+                    _ => return Err(SemanticError::UndefinedFunction(method.clone())),
                 };
 
                 if let Some(symbol) = self.scopes.lookup(&type_name) {
@@ -826,6 +881,7 @@ impl TypeChecker {
                         false,
                         ty,
                         self.scopes.current_level(),
+                        false, // lambda params are not object_mutable by default
                     );
                     self.scopes.define(&param.name, symbol);
                 }
@@ -912,7 +968,22 @@ impl TypeChecker {
                             return Err(SemanticError::CannotAssignImmutable(name.clone()));
                         }
                     }
-                    ExprKind::FieldAccess { .. } | ExprKind::Index { .. } => {}
+                    ExprKind::Index { object, index: _ } => {
+                        // Check if the array is mutable for index assignment
+                        if let ExprKind::Ident(name) = &object.kind {
+                            let symbol = self.scopes.lookup(name).ok_or_else(|| {
+                                SemanticError::UndefinedVariable(name.clone())
+                            })?;
+
+                            if !symbol.is_object_mutable() {
+                                return Err(SemanticError::ImmutableArrayModification {
+                                    method: "index assignment".to_string(),
+                                    span: target.span,
+                                });
+                            }
+                        }
+                    }
+                    ExprKind::FieldAccess { .. } => {}
                     _ => return Err(SemanticError::InvalidAssignmentTarget),
                 }
 

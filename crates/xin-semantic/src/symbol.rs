@@ -9,6 +9,7 @@ pub enum SymbolKind {
         mutable: bool,
         type_annotation: Type,
         moved: bool,
+        object_mutable: bool,
     },
     Function {
         params: Vec<(String, Type, bool)>, // (name, type, mutable)
@@ -41,13 +42,20 @@ pub struct Symbol {
 }
 
 impl Symbol {
-    pub fn variable(name: String, mutable: bool, type_annotation: Type, scope_level: usize) -> Self {
+    pub fn variable(
+        name: String,
+        mutable: bool,
+        type_annotation: Type,
+        scope_level: usize,
+        object_mutable: bool,
+    ) -> Self {
         Self {
             name,
             kind: SymbolKind::Variable {
                 mutable,
                 type_annotation,
                 moved: false,
+                object_mutable,
             },
             scope_level,
         }
@@ -77,6 +85,13 @@ impl Symbol {
     pub fn is_mutable(&self) -> bool {
         match &self.kind {
             SymbolKind::Variable { mutable, .. } => *mutable,
+            _ => false,
+        }
+    }
+
+    pub fn is_object_mutable(&self) -> bool {
+        match &self.kind {
+            SymbolKind::Variable { object_mutable, .. } => *object_mutable,
             _ => false,
         }
     }
