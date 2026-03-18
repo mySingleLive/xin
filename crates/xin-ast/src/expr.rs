@@ -26,6 +26,8 @@ pub enum ExprKind {
     FloatLiteral(f64),
     /// String literal: "hello"
     StringLiteral(String),
+    /// Template string: `hello {name}`
+    TemplateLiteral(Vec<TemplatePart>),
     /// Boolean literal: true, false
     BoolLiteral(bool),
     /// Null literal
@@ -157,4 +159,13 @@ pub enum BinOp {
 pub enum UnaryOp {
     Neg,
     Not,
+}
+
+/// Template string part
+#[derive(Debug, Clone)]
+pub enum TemplatePart {
+    /// Plain text
+    Text(String),
+    /// Embedded expression
+    Expr(Box<Expr>),
 }

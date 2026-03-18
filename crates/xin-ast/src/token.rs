@@ -9,6 +9,7 @@ pub enum TokenKind {
     IntLiteral,
     FloatLiteral,
     StringLiteral,
+    TemplateString,
     BoolLiteral,
 
     // Identifiers and keywords
@@ -89,6 +90,7 @@ impl fmt::Display for TokenKind {
             TokenKind::IntLiteral => write!(f, "integer literal"),
             TokenKind::FloatLiteral => write!(f, "float literal"),
             TokenKind::StringLiteral => write!(f, "string literal"),
+            TokenKind::TemplateString => write!(f, "template string"),
             TokenKind::BoolLiteral => write!(f, "boolean literal"),
             TokenKind::Ident => write!(f, "identifier"),
             TokenKind::Let => write!(f, "let"),

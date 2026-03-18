@@ -149,6 +149,13 @@ pub trait Visitor {
             ExprKind::Cast { expr, .. } => {
                 self.visit_expr(expr);
             }
+            ExprKind::TemplateLiteral(parts) => {
+                for part in parts {
+                    if let crate::TemplatePart::Expr(e) = part {
+                        self.visit_expr(e);
+                    }
+                }
+            }
         }
     }
 }
