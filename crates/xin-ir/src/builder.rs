@@ -449,18 +449,53 @@ impl IRBuilder {
                 }
             }
             ExprKind::MethodCall { object, method, args } => {
-                let _obj_val = self.build_expr(object)?;
-                let arg_vals: Vec<Value> = args.iter().filter_map(|a| self.build_expr(a)).collect();
-
-                let result = self.new_temp();
-                // Method call as function call with self parameter
-                self.emit(Instruction::Call {
-                    result: Some(result.clone()),
-                    func: method.clone(),
-                    args: arg_vals,
-                    is_extern: false,
-                });
-                Some(result)
+                match method.as_str() {
+                    "len" => {
+                        let obj_val = self.build_expr(object)?;
+                        let result = self.new_temp();
+                        self.emit(Instruction::ArrayLen {
+                            result: result.clone(),
+                            array: obj_val,
+                        });
+                        Some(result)
+                    }
+                    "push" => {
+                        let obj_val = self.build_expr(object)?;
+                        let arg_val = self.build_expr(&args[0])?;
+                        self.emit(Instruction::ArrayPush {
+                            array: obj_val,
+                            value: arg_val,
+                        });
+                        None
+                    }
+                    "pop" => {
+                        let obj_val = self.build_expr(object)?;
+                        let result = self.new_temp();
+                        self.emit(Instruction::ArrayPop {
+                            result: result.clone(),
+                            array: obj_val,
+                        });
+                        Some(result)
+                    }
+                    _ => {
+                        // Other method calls: treat as function call with self parameter
+                        let obj_val = self.build_expr(object)?;
+                        let mut arg_vals = vec![obj_val];
+                        for a in args {
+                            if let Some(v) = self.build_expr(a) {
+                                arg_vals.push(v);
+                            }
+                        }
+                        let result = self.new_temp();
+                        self.emit(Instruction::Call {
+                            result: Some(result.clone()),
+                            func: method.clone(),
+                            args: arg_vals,
+                            is_extern: false,
+                        });
+                        Some(result)
+                    }
+                }
             }
             ExprKind::Assignment { target, value } => {
                 let val = self.build_expr(value)?;
@@ -514,6 +549,47 @@ impl IRBuilder {
             }
             ExprKind::Move(inner) => self.build_expr(inner),
             ExprKind::Cast { expr, target_type: _ } => self.build_expr(expr),
+            ExprKind::ArrayLiteral(elements) => {
+                let capacity = elements.len();
+                let result = self.new_temp();
+
+                // Create array
+                self.emit(Instruction::ArrayNew {
+                    result: result.clone(),
+                    capacity,
+                });
+
+                // Fill elements
+                for (i, elem) in elements.iter().enumerate() {
+                    let elem_val = self.build_expr(elem)?;
+                    let index = self.new_temp();
+                    self.emit(Instruction::Const {
+                        result: index.clone(),
+                        value: i.to_string(),
+                        ty: IRType::I64,
+                    });
+                    self.emit(Instruction::ArraySet {
+                        array: result.clone(),
+                        index,
+                        value: elem_val,
+                    });
+                }
+
+                Some(result)
+            }
+            ExprKind::Index { object, index } => {
+                let obj_val = self.build_expr(object)?;
+                let idx_val = self.build_expr(index)?;
+                let result = self.new_temp();
+
+                self.emit(Instruction::ArrayGet {
+                    result: result.clone(),
+                    array: obj_val,
+                    index: idx_val,
+                });
+
+                Some(result)
+            }
             _ => None,
         }
     }
@@ -525,6 +601,8 @@ impl IRBuilder {
             Type::Bool => IRType::Bool,
             Type::String => IRType::String,
             Type::Void => IRType::Void,
+            Type::Object => IRType::Object,
+            Type::Array(_) => IRType::Object,
             Type::Named(name) => IRType::Ptr(name.clone()),
             Type::Pointer { inner, .. } => match &**inner {
                 Type::Named(name) => IRType::Ptr(name.clone()),
