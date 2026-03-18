@@ -738,6 +738,42 @@ impl AOTCodeGenerator {
 
                 builder.ins().call(func_ref, &[val]);
             }
+            Instruction::ToString { result, value, from_type } => {
+                let val = self.load_variable(builder, value, variables)?;
+
+                let func_name = match from_type {
+                    IRType::I64 => "xin_int_to_str",
+                    IRType::F64 => "xin_float_to_str",
+                    IRType::Bool => "xin_bool_to_str",
+                    _ => "xin_int_to_str",
+                };
+
+                let func_ref = if let Some(fr) = func_ref_cache.get(func_name) {
+                    *fr
+                } else {
+                    let func_id = *self.extern_func_ids.get(func_name)
+                        .ok_or_else(|| format!("Function '{}' not declared", func_name))?;
+                    let sig = self.func_sigs.get(func_name)
+                        .ok_or_else(|| format!("Signature not found for function '{}'", func_name))?
+                        .clone();
+                    let sig_ref = builder.func.import_signature(sig);
+                    let user_func_name = builder.func.declare_imported_user_function(UserExternalName {
+                        namespace: 0,
+                        index: func_id.as_u32(),
+                    });
+                    let fr = builder.import_function(ExtFuncData {
+                        name: ExternalName::user(user_func_name),
+                        signature: sig_ref,
+                        colocated: true,
+                    });
+                    func_ref_cache.insert(func_name.to_string(), fr);
+                    fr
+                };
+
+                let call_val = builder.ins().call(func_ref, &[val]);
+                let ret_val = builder.inst_results(call_val)[0];
+                self.store_variable(builder, result, ret_val, variables, var_counter, self.pointer_type);
+            }
         }
         Ok(())
     }
