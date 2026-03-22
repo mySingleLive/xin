@@ -821,4 +821,6 @@ dependencies = [
  "thiserror",
  "xin-ast",
  "xin-diagnostics",
+ "xin-lexer",
+ "xin-parser",
 ]
