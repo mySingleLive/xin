@@ -80,9 +80,23 @@ impl CodeGenerator {
             variables.insert(name.clone(), var);
         }
 
+        // First pass: collect all labels and create blocks
+        let mut label_to_block: std::collections::HashMap<String, Block> = std::collections::HashMap::new();
+        for instr in &func.instructions {
+            if let Instruction::Label(name) = instr {
+                let block = builder.create_block();
+                label_to_block.insert(name.clone(), block);
+            }
+        }
+
         // Process instructions
         for instr in &func.instructions {
-            self.compile_instruction(&mut builder, instr, &mut variables, &mut var_counter, pointer_type)?;
+            self.compile_instruction(&mut builder, instr, &mut variables, &mut var_counter, pointer_type, &label_to_block)?;
+        }
+
+        // Seal all blocks that were created for labels
+        for block in label_to_block.values() {
+            builder.seal_block(*block);
         }
 
         builder.finalize();
@@ -104,6 +118,7 @@ impl CodeGenerator {
         variables: &mut std::collections::HashMap<String, Variable>,
         var_counter: &mut usize,
         pointer_type: Type,
+        label_to_block: &std::collections::HashMap<String, Block>,
     ) -> Result<(), String> {
         match instr {
             Instruction::Const { result, value, ty } => {
@@ -179,14 +194,30 @@ impl CodeGenerator {
                     self.store_variable(builder, result, val, variables, var_counter);
                 }
             }
-            Instruction::Jump(label) => {
-                // TODO: Implement jumps with block management
+            Instruction::Jump(target_label) => {
+                if let Some(&target_block) = label_to_block.get(target_label) {
+                    builder.ins().jump(target_block, &[]);
+                } else {
+                    return Err(format!("Label {} not found", target_label));
+                }
             }
             Instruction::Branch { cond, then_label, else_label } => {
-                // TODO: Implement branches
+                let cond_val = self.load_variable(builder, cond, variables)?;
+                // Compare with zero (false)
+                let zero = builder.ins().iconst(types::I64, 0);
+                let cond_i8 = builder.ins().icmp(IntCC::NotEqual, cond_val, zero);
+
+                let then_block = *label_to_block.get(then_label)
+                    .ok_or_else(|| format!("Label {} not found", then_label))?;
+                let else_block = *label_to_block.get(else_label)
+                    .ok_or_else(|| format!("Label {} not found", else_label))?;
+
+                builder.ins().brif(cond_i8, then_block, &[], else_block, &[]);
             }
             Instruction::Label(name) => {
-                // TODO: Implement labels
+                if let Some(&block) = label_to_block.get(name) {
+                    builder.switch_to_block(block);
+                }
             }
             _ => {}
         }

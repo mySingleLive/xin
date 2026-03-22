@@ -1,0 +1,15 @@
+// Test if/else branching
+// This test checks if only one branch is executed
+
+func main() {
+    let x = 10
+    var result = 0
+
+    if (x > 5) {
+        result = 1
+    } else {
+        result = 2
+    }
+
+    println(result)  // Should output: 1
+}
