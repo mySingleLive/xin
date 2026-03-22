@@ -351,6 +351,16 @@ int32?     // 可空整数
 char?      // 可空字符
 ```
 
+**`?` 结合优先级：**
+
+`?` 紧跟在类型后面，优先级最高：
+
+```xin
+int32?      // (int32)?，可空整数
+int32?[]    // ((int32)?)[]，可空整数的数组
+int32[]?    // (int32[])?，可空的整数数组
+```
+
 ### 6.3 null 关键字
 
 ```xin
@@ -503,6 +513,25 @@ forEach([1, 4]) {
 }
 ```
 
+#### 尾参 Lambda 解析规则
+
+当函数调用的最后一个参数是 Lambda 时，可以将 Lambda 写在括号外：
+
+```xin
+// 以下两种写法等价：
+apply([1, 4], a: int32) { return a * 2 + 1 }
+apply([1, 4], (a: int32) -> { return a * 2 + 1 })
+
+// 唯一参数的 Lambda 可以省略括号：
+run(a: int32, b: int32) { return a + b * 2 }
+run((a: int32, b: int32) -> { return a + b * 2 })
+```
+
+**解析规则：**
+1. 函数调用后紧跟 `{` 且前一个参数是 Lambda 类型 → 尾参 Lambda
+2. 函数调用后紧跟 `(params) {` → 唯一参数 Lambda
+3. 括号闭合后紧跟 `{` → 尾参 Lambda
+
 ### 7.4 值捕获
 
 Lambda 捕获变量的当前值，捕获后原变量修改不影响 Lambda 内的值：
@@ -514,6 +543,11 @@ let multiply = x -> x * multiplier
 multiplier = 20
 multiply(5)  // 返回 50，不是 100
 ```
+
+**捕获语义：**
+- 在 Lambda 定义时捕获变量的值（快照）
+- 捕获的是值本身，不是引用
+- 嵌套 Lambda 各自独立捕获外层变量
 
 ### 7.5 影响范围
 
@@ -536,6 +570,7 @@ multiply(5)  // 返回 50，不是 100
 let m = {"name": "Alice", "age": 30}   // 字符串字面量作为键
 let m2 = {key: value}                   // 变量 key 的值作为键
 let m3 = {getKey(): getValue()}         // 表达式作为键
+let empty = {}                          // 空 Map
 ```
 
 #### 键的规则
@@ -547,6 +582,10 @@ let m3 = {getKey(): getValue()}         // 表达式作为键
 | `{"name": value}` | 键是字符串字面量 `"name"` |
 | `{key: value}` | 键是变量 `key` 的值 |
 | `{expr(): value}` | 键是表达式 `expr()` 的返回值 |
+
+**键类型限制：**
+
+Map 的键类型目前仅支持 `string` 类型。整数或其他类型作为键的特性待后续扩展。
 
 **示例：**
 
@@ -560,6 +599,19 @@ let user = {id: "Alice", "age": 30}
 let key = "name"
 let m = {key: "Bob"}
 // m 的内容：键 "name"（变量 key 的值）对应值 "Bob"
+```
+
+#### 空 Map 与空代码块歧义
+
+空 `{}` 根据上下文推断：
+- **表达式位置**：解析为空 Map
+- **语句位置**：解析为空代码块
+
+```xin
+let m = {}           // 表达式位置 → 空 Map
+if (true) {}         // 语句位置 → 空代码块
+func foo() {}        // 语句位置 → 空函数体
+let x = {}           // 表达式位置 → 空 Map
 ```
 
 ### 8.2 类型推断
