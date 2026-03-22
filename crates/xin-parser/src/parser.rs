@@ -1029,6 +1029,85 @@ impl Parser {
                 // Treat 'char' as identifier for function call
                 Ok(Expr::new(ExprKind::Ident("char".to_string()), span))
             }
+            // Handle type keywords as identifiers for type conversion functions
+            // Signed integer types: int8(), int16(), int32(), int64(), int128()
+            TokenKind::Int8 => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("int8".to_string()), span))
+            }
+            TokenKind::Int16 => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("int16".to_string()), span))
+            }
+            TokenKind::Int32 => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("int32".to_string()), span))
+            }
+            TokenKind::Int64 => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("int64".to_string()), span))
+            }
+            TokenKind::Int128 => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("int128".to_string()), span))
+            }
+            // Unsigned integer types: uint8(), uint16(), uint32(), uint64(), uint128()
+            TokenKind::UInt8 => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("uint8".to_string()), span))
+            }
+            TokenKind::UInt16 => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("uint16".to_string()), span))
+            }
+            TokenKind::UInt32 => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("uint32".to_string()), span))
+            }
+            TokenKind::UInt64 => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("uint64".to_string()), span))
+            }
+            TokenKind::UInt128 => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("uint128".to_string()), span))
+            }
+            // Byte type
+            TokenKind::Byte => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("byte".to_string()), span))
+            }
+            // Floating-point types: float8(), float16(), float32(), float64(), float128()
+            TokenKind::Float8 => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("float8".to_string()), span))
+            }
+            TokenKind::Float16 => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("float16".to_string()), span))
+            }
+            TokenKind::Float32 => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("float32".to_string()), span))
+            }
+            TokenKind::Float64 => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("float64".to_string()), span))
+            }
+            TokenKind::Float128 => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("float128".to_string()), span))
+            }
+            // Bool type: bool()
+            TokenKind::Bool => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("bool".to_string()), span))
+            }
+            // String type: string()
+            TokenKind::String => {
+                self.advance();
+                Ok(Expr::new(ExprKind::Ident("string".to_string()), span))
+            }
             TokenKind::LParen => {
                 self.advance();
                 // Could be grouping, tuple, or lambda

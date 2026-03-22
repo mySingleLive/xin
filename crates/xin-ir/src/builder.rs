@@ -505,6 +505,11 @@ impl IRBuilder {
                             return self.handle_printf(args);
                         }
 
+                        // Handle type conversion functions
+                        if let Some(target_type) = self.get_type_conversion_target(name) {
+                            return self.handle_type_conversion(name, args, target_type);
+                        }
+
                         // Regular function call
                         let arg_vals: Vec<Value> = args.iter().filter_map(|a| self.build_expr(a)).collect();
                         let result = self.new_temp();
@@ -1089,6 +1094,15 @@ impl IRBuilder {
                     IRType::I64
                 }
             }
+            // Handle type conversion function calls
+            ExprKind::Call { callee, args: _ } => {
+                if let ExprKind::Ident(name) = &callee.kind {
+                    if let Some(target_type) = self.get_type_conversion_target(name) {
+                        return self.convert_type(&target_type);
+                    }
+                }
+                IRType::I64
+            }
             _ => IRType::I64,
         }
     }
@@ -1120,6 +1134,15 @@ impl IRBuilder {
                 } else {
                     Type::Int64
                 }
+            }
+            // Handle type conversion function calls
+            ExprKind::Call { callee, args: _ } => {
+                if let ExprKind::Ident(name) = &callee.kind {
+                    if let Some(target_type) = self.get_type_conversion_target(name) {
+                        return target_type;
+                    }
+                }
+                Type::Int64
             }
             _ => Type::Int64,
         }
@@ -1344,6 +1367,64 @@ impl IRBuilder {
                 result
             }
         }
+    }
+
+    /// Get the target type for a type conversion function name.
+    /// Returns None if the name is not a type conversion function.
+    fn get_type_conversion_target(&self, name: &str) -> Option<Type> {
+        match name {
+            // Signed integer types
+            "int8" => Some(Type::Int8),
+            "int16" => Some(Type::Int16),
+            "int32" => Some(Type::Int32),
+            "int64" => Some(Type::Int64),
+            "int128" => Some(Type::Int128),
+            // Unsigned integer types
+            "uint8" => Some(Type::UInt8),
+            "uint16" => Some(Type::UInt16),
+            "uint32" => Some(Type::UInt32),
+            "uint64" => Some(Type::UInt64),
+            "uint128" => Some(Type::UInt128),
+            "byte" => Some(Type::UInt8), // byte is alias for uint8
+            // Floating-point types
+            "float8" => Some(Type::Float8),
+            "float16" => Some(Type::Float16),
+            "float32" => Some(Type::Float32),
+            "float64" => Some(Type::Float64),
+            "float128" => Some(Type::Float128),
+            // Other types
+            "bool" => Some(Type::Bool),
+            "string" => Some(Type::String),
+            _ => None,
+        }
+    }
+
+    /// Handle type conversion function calls like int32(x), string(x), etc.
+    fn handle_type_conversion(&mut self, name: &str, args: &[Expr], target_type: Type) -> Option<Value> {
+        if args.is_empty() {
+            return None;
+        }
+
+        let arg_val = self.build_expr(&args[0])?;
+        let arg_type = self.get_expr_type_with_vars(&args[0]).unwrap_or(Type::Int64);
+        let from_ir_type = self.convert_type(&arg_type);
+        let to_ir_type = self.convert_type(&target_type);
+
+        // Special case: string() conversion
+        if name == "string" {
+            return Some(self.convert_to_string(arg_val, Some(arg_type)));
+        }
+
+        // For numeric types, emit a TypeCast instruction
+        let result = self.new_temp();
+        self.emit(Instruction::TypeCast {
+            result: result.clone(),
+            value: arg_val,
+            from_type: from_ir_type,
+            to_type: to_ir_type,
+        });
+
+        Some(result)
     }
 }
 

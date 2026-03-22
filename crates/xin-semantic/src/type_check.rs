@@ -608,6 +608,36 @@ impl TypeChecker {
                         return Ok(Type::Char);
                     }
 
+                    // Handle type conversion functions: int8(), int16(), int32(), int64(), int128(),
+                    // uint8(), uint16(), uint32(), uint64(), uint128(),
+                    // float8(), float16(), float32(), float64(), float128(),
+                    // bool(), string()
+                    if let Some(target_type) = self.get_type_conversion_target(name) {
+                        if args.len() != 1 {
+                            return Err(SemanticError::WrongNumberOfArguments {
+                                expected: 1,
+                                found: args.len(),
+                            });
+                        }
+                        // Check the argument expression
+                        let arg_type = self.check_expr(&args[0])?;
+                        // Type conversions accept any numeric type or string
+                        // For now, we allow all conversions (runtime will handle)
+                        // But we validate string -> int conversions at compile time if literal
+                        if name == "string" {
+                            // string() can convert any type to string
+                            return Ok(Type::String);
+                        }
+                        // For numeric type conversions, validate the source is numeric or string
+                        if !arg_type.is_numeric() && arg_type != Type::String && arg_type != Type::Bool {
+                            return Err(SemanticError::TypeMismatch {
+                                expected: Type::Object, // Using Object as "any numeric type"
+                                found: arg_type,
+                            });
+                        }
+                        return Ok(target_type);
+                    }
+
                     // Clone the function info if found
                     let func_info = self.scopes.lookup(name).and_then(|symbol| {
                         if let SymbolKind::Function { params, return_type } = &symbol.kind {
@@ -1211,6 +1241,36 @@ impl TypeChecker {
         }
 
         Ok(types)
+    }
+
+    /// Get the target type for a type conversion function name.
+    /// Returns None if the name is not a type conversion function.
+    fn get_type_conversion_target(&self, name: &str) -> Option<Type> {
+        match name {
+            // Signed integer types
+            "int8" => Some(Type::Int8),
+            "int16" => Some(Type::Int16),
+            "int32" => Some(Type::Int32),
+            "int64" => Some(Type::Int64),
+            "int128" => Some(Type::Int128),
+            // Unsigned integer types
+            "uint8" => Some(Type::UInt8),
+            "uint16" => Some(Type::UInt16),
+            "uint32" => Some(Type::UInt32),
+            "uint64" => Some(Type::UInt64),
+            "uint128" => Some(Type::UInt128),
+            "byte" => Some(Type::UInt8), // byte is alias for uint8
+            // Floating-point types
+            "float8" => Some(Type::Float8),
+            "float16" => Some(Type::Float16),
+            "float32" => Some(Type::Float32),
+            "float64" => Some(Type::Float64),
+            "float128" => Some(Type::Float128),
+            // Other types
+            "bool" => Some(Type::Bool),
+            "string" => Some(Type::String),
+            _ => None,
+        }
     }
 }
 

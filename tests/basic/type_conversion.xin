@@ -1,0 +1,23 @@
+// Type conversion test cases
+
+func main() {
+    // Integer to integer conversion
+    let a = 100               // int64 by default
+    let b = int64(a)          // int64 to int64 (no-op)
+    println(b)
+
+    // Integer to float conversion
+    let f = float64(a)        // int64 to float64
+    printf("%f\n", f)
+
+    // String conversion
+    let s = string(42)        // int to string "42"
+    println(s)
+
+    // Test type annotations with type conversion
+    let x = int64(100)
+    let z = float64(100)
+
+    println(x)
+    printf("%f\n", z)
+}

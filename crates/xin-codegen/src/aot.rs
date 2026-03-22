@@ -934,6 +934,12 @@ impl AOTCodeGenerator {
                 // TODO: Implement break/continue codegen (Task 3.3)
                 // These require loop context tracking to jump to the appropriate label
             }
+            Instruction::TypeCast { result, value, from_type, to_type } => {
+                let val = self.load_variable(builder, value, variables)?;
+                let cast_val = self.emit_type_cast(builder, val, from_type, to_type);
+                let cranelift_ty = self.convert_ir_type(to_type);
+                self.store_variable(builder, result, cast_val, variables, var_counter, cranelift_ty);
+            }
         }
         Ok(())
     }
@@ -1055,6 +1061,79 @@ impl AOTCodeGenerator {
             IRType::Ptr(_) => self.pointer_type,
             IRType::Object => self.pointer_type, // Object types are pointers
         }
+    }
+
+    /// Alias for convert_type for clarity
+    fn convert_ir_type(&self, ty: &IRType) -> Type {
+        self.convert_type(ty)
+    }
+
+    /// Emit type cast instruction
+    fn emit_type_cast(
+        &self,
+        builder: &mut FunctionBuilder,
+        value: Value,
+        from_type: &IRType,
+        to_type: &IRType,
+    ) -> Value {
+        let from = self.convert_type(from_type);
+        let to = self.convert_type(to_type);
+
+        // Handle integer to integer conversions
+        if from.is_int() && to.is_int() {
+            let from_bits = from.bits();
+            let to_bits = to.bits();
+
+            if to_bits > from_bits {
+                // Extension: sign-extend for signed, zero-extend for unsigned
+                if Self::is_signed_int(from_type) {
+                    builder.ins().sextend(to, value)
+                } else {
+                    builder.ins().uextend(to, value)
+                }
+            } else if to_bits < from_bits {
+                // Truncation
+                builder.ins().ireduce(to, value)
+            } else {
+                // Same size, no conversion needed
+                value
+            }
+        }
+        // Handle float to float conversions
+        else if from.is_float() && to.is_float() {
+            if to.bits() > from.bits() {
+                builder.ins().fpromote(to, value)
+            } else if to.bits() < from.bits() {
+                builder.ins().fdemote(to, value)
+            } else {
+                value
+            }
+        }
+        // Handle integer to float conversions
+        else if from.is_int() && to.is_float() {
+            if Self::is_signed_int(from_type) {
+                builder.ins().fcvt_from_sint(to, value)
+            } else {
+                builder.ins().fcvt_from_uint(to, value)
+            }
+        }
+        // Handle float to integer conversions
+        else if from.is_float() && to.is_int() {
+            if Self::is_signed_int(to_type) {
+                builder.ins().fcvt_to_sint_sat(to, value)
+            } else {
+                builder.ins().fcvt_to_uint_sat(to, value)
+            }
+        }
+        // Default: just return the value
+        else {
+            value
+        }
+    }
+
+    /// Check if an IR type is a signed integer
+    fn is_signed_int(ty: &IRType) -> bool {
+        matches!(ty, IRType::I8 | IRType::I16 | IRType::I32 | IRType::I64 | IRType::I128)
     }
 
     /// Emit the compiled object file

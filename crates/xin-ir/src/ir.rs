@@ -163,6 +163,14 @@ pub enum Instruction {
         from_type: IRType,
     },
 
+    /// Type cast: %result = cast value, target_type
+    TypeCast {
+        result: Value,
+        value: Value,
+        from_type: IRType,
+        to_type: IRType,
+    },
+
     /// String deallocation: free value
     StringFree {
         value: Value,
@@ -332,6 +340,12 @@ impl fmt::Display for Instruction {
                 value,
                 from_type,
             } => write!(f, "{} = to_string {} [{}]", result, value, from_type),
+            Instruction::TypeCast {
+                result,
+                value,
+                from_type,
+                to_type,
+            } => write!(f, "{} = cast {} from {} to {}", result, value, from_type, to_type),
             Instruction::StringFree { value } => write!(f, "free {}", value),
             Instruction::ArrayNew { result, capacity } => {
                 write!(f, "{} = array_new {}", result, capacity)

@@ -219,6 +219,51 @@ impl CodeGenerator {
                     builder.switch_to_block(block);
                 }
             }
+            Instruction::TypeCast { result, value, from_type, to_type } => {
+                let val = self.load_variable(builder, value, variables)?;
+                let cast_val = self.emit_type_cast(builder, val, from_type, to_type);
+                let cranelift_ty = self.convert_type(to_type);
+                self.store_variable_with_type(builder, result, cast_val, variables, var_counter, cranelift_ty);
+            }
+            Instruction::Alloca { result, ty } => {
+                // Allocate stack slot and store the pointer
+                let cranelift_ty = self.convert_type(ty);
+                // We don't actually allocate stack space here; instead, we just declare a variable
+                // with the correct type. The actual storage is managed by Cranelift's SSA form.
+                let var = Variable::new(*var_counter);
+                *var_counter += 1;
+                variables.insert(result.0.clone(), var);
+                // Initialize with a default value
+                let default_val = if cranelift_ty.is_int() {
+                    builder.ins().iconst(cranelift_ty, 0)
+                } else if cranelift_ty.is_float() {
+                    builder.ins().f64const(0.0)
+                } else {
+                    builder.ins().iconst(types::I64, 0)
+                };
+                builder.declare_var(var, cranelift_ty);
+                builder.def_var(var, default_val);
+            }
+            Instruction::Store { value, ptr } => {
+                // Store the value in the variable
+                let val = self.load_variable(builder, value, variables)?;
+                if let Some(var) = variables.get(&ptr.0) {
+                    builder.def_var(*var, val);
+                }
+            }
+            Instruction::Load { result, ptr } => {
+                // Load the value from the variable
+                if let Some(var) = variables.get(&ptr.0) {
+                    let val = builder.use_var(*var);
+                    // Get the type of the variable to declare the result with correct type
+                    let val_ty = builder.func.dfg.value_type(val);
+                    self.store_variable_with_type(builder, result, val, variables, var_counter, val_ty);
+                } else {
+                    // Variable not found, store a default value
+                    let val = builder.ins().iconst(types::I64, 0);
+                    self.store_variable(builder, result, val, variables, var_counter);
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -254,6 +299,22 @@ impl CodeGenerator {
         builder.def_var(var, value);
     }
 
+    fn store_variable_with_type(
+        &self,
+        builder: &mut FunctionBuilder,
+        result: &xin_ir::Value,
+        value: Value,
+        variables: &mut std::collections::HashMap<String, Variable>,
+        var_counter: &mut usize,
+        ty: Type,
+    ) {
+        let var = Variable::new(*var_counter);
+        *var_counter += 1;
+        variables.insert(result.0.clone(), var);
+        builder.declare_var(var, ty);
+        builder.def_var(var, value);
+    }
+
     fn convert_type(&self, ty: &IRType) -> Type {
         match ty {
             IRType::I8 => types::I8,
@@ -278,6 +339,74 @@ impl CodeGenerator {
             IRType::Ptr(_) => types::I64,
             IRType::Object => types::I64, // Object types are pointers
         }
+    }
+
+    /// Emit type cast instruction
+    fn emit_type_cast(
+        &self,
+        builder: &mut FunctionBuilder,
+        value: Value,
+        from_type: &IRType,
+        to_type: &IRType,
+    ) -> Value {
+        let from = self.convert_type(from_type);
+        let to = self.convert_type(to_type);
+
+        // Handle integer to integer conversions
+        if from.is_int() && to.is_int() {
+            let from_bits = from.bits();
+            let to_bits = to.bits();
+
+            if to_bits > from_bits {
+                // Extension: sign-extend for signed, zero-extend for unsigned
+                if Self::is_signed_int(from_type) {
+                    builder.ins().sextend(to, value)
+                } else {
+                    builder.ins().uextend(to, value)
+                }
+            } else if to_bits < from_bits {
+                // Truncation
+                builder.ins().ireduce(to, value)
+            } else {
+                // Same size, no conversion needed
+                value
+            }
+        }
+        // Handle float to float conversions
+        else if from.is_float() && to.is_float() {
+            if to.bits() > from.bits() {
+                builder.ins().fpromote(to, value)
+            } else if to.bits() < from.bits() {
+                builder.ins().fdemote(to, value)
+            } else {
+                value
+            }
+        }
+        // Handle integer to float conversions
+        else if from.is_int() && to.is_float() {
+            if Self::is_signed_int(from_type) {
+                builder.ins().fcvt_from_sint(to, value)
+            } else {
+                builder.ins().fcvt_from_uint(to, value)
+            }
+        }
+        // Handle float to integer conversions
+        else if from.is_float() && to.is_int() {
+            if Self::is_signed_int(to_type) {
+                builder.ins().fcvt_to_sint_sat(to, value)
+            } else {
+                builder.ins().fcvt_to_uint_sat(to, value)
+            }
+        }
+        // Default: just return the value
+        else {
+            value
+        }
+    }
+
+    /// Check if an IR type is a signed integer
+    fn is_signed_int(ty: &IRType) -> bool {
+        matches!(ty, IRType::I8 | IRType::I16 | IRType::I32 | IRType::I64 | IRType::I128)
     }
 
     pub fn finalize(&mut self) -> Result<(), String> {
