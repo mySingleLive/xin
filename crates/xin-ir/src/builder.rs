@@ -6,6 +6,12 @@ use xin_ast::{BinOp as AstBinOp, Decl, DeclKind, Expr, ExprKind, FuncDecl, Sourc
 
 use crate::{BinOp, ConcatType, ExternFunction, Instruction, IRFunction, IRModule, IRType, Value};
 
+/// Loop context for break/continue
+struct LoopContext {
+    break_label: String,
+    continue_label: String,
+}
+
 /// IR Builder
 pub struct IRBuilder {
     module: IRModule,
@@ -18,6 +24,8 @@ pub struct IRBuilder {
     blocks: HashSet<String>,
     /// Current block label
     current_block: Option<String>,
+    /// Loop context stack for break/continue
+    loop_stack: Vec<LoopContext>,
 }
 
 impl IRBuilder {
@@ -30,6 +38,7 @@ impl IRBuilder {
             variable_types: HashMap::new(),
             blocks: HashSet::new(),
             current_block: None,
+            loop_stack: Vec::new(),
         }
     }
 
@@ -213,7 +222,14 @@ impl IRBuilder {
 
                         let cond_label = self.new_label();
                         let body_label = self.new_label();
+                        let update_label = self.new_label();
                         let end_label = self.new_label();
+
+                        // Push loop context
+                        self.loop_stack.push(LoopContext {
+                            break_label: end_label.clone(),
+                            continue_label: update_label.clone(),
+                        });
 
                         // Jump from entry block to loop condition check
                         if !self.last_instruction_is_terminator() {
@@ -237,12 +253,22 @@ impl IRBuilder {
                         for stmt in body {
                             self.build_stmt(stmt);
                         }
+                        // Only emit jump to update if the block doesn't end with a terminator
+                        if !self.last_instruction_is_terminator() {
+                            self.emit(Instruction::Jump(update_label.clone()));
+                        }
+
+                        // Update block (continue target)
+                        self.emit(Instruction::Label(update_label));
                         if let Some(update) = update {
                             self.build_expr(update);
                         }
                         self.emit(Instruction::Jump(cond_label));
 
                         self.emit(Instruction::Label(end_label));
+
+                        // Pop loop context
+                        self.loop_stack.pop();
                     }
                     xin_ast::ForLoop::ForIn { var_name: _, iterable, body } => {
                         // Simplified: just emit body
@@ -256,6 +282,12 @@ impl IRBuilder {
                         let cond_label = self.new_label();
                         let body_label = self.new_label();
                         let end_label = self.new_label();
+
+                        // Push loop context
+                        self.loop_stack.push(LoopContext {
+                            break_label: end_label.clone(),
+                            continue_label: cond_label.clone(),
+                        });
 
                         // Jump from entry block to loop condition check
                         if !self.last_instruction_is_terminator() {
@@ -273,12 +305,26 @@ impl IRBuilder {
                         for stmt in body {
                             self.build_stmt(stmt);
                         }
-                        self.emit(Instruction::Jump(cond_label));
+                        // Only emit jump if the block doesn't end with a terminator
+                        if !self.last_instruction_is_terminator() {
+                            self.emit(Instruction::Jump(cond_label));
+                        }
 
                         self.emit(Instruction::Label(end_label));
+
+                        // Pop loop context
+                        self.loop_stack.pop();
                     }
                     xin_ast::ForLoop::Infinite { body } => {
                         let body_label = self.new_label();
+                        let end_label = self.new_label();
+
+                        // Push loop context
+                        self.loop_stack.push(LoopContext {
+                            break_label: end_label.clone(),
+                            continue_label: body_label.clone(),
+                        });
+
                         // Jump from entry block to loop body
                         if !self.last_instruction_is_terminator() {
                             self.emit(Instruction::Jump(body_label.clone()));
@@ -287,11 +333,28 @@ impl IRBuilder {
                         for stmt in body {
                             self.build_stmt(stmt);
                         }
-                        self.emit(Instruction::Jump(body_label));
+                        // Only emit jump if the block doesn't end with a terminator
+                        if !self.last_instruction_is_terminator() {
+                            self.emit(Instruction::Jump(body_label));
+                        }
+
+                        self.emit(Instruction::Label(end_label));
+
+                        // Pop loop context
+                        self.loop_stack.pop();
                     }
                 }
             }
-            StmtKind::Break | StmtKind::Continue => {}
+            StmtKind::Break => {
+                if let Some(ctx) = self.loop_stack.last() {
+                    self.emit(Instruction::Jump(ctx.break_label.clone()));
+                }
+            }
+            StmtKind::Continue => {
+                if let Some(ctx) = self.loop_stack.last() {
+                    self.emit(Instruction::Jump(ctx.continue_label.clone()));
+                }
+            }
             StmtKind::Block(stmts) => {
                 for stmt in stmts {
                     self.build_stmt(stmt);

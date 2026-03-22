@@ -1,0 +1,39 @@
+// Test break and continue statements
+
+func main() {
+    // Test 1: break in for loop
+    var sum1 = 0
+    for (var i = 0; i < 100; i = i + 1) {
+        if (i == 5) { break }
+        sum1 = sum1 + i
+    }
+    println(sum1)  // Expected: 10 (0+1+2+3+4)
+
+    // Test 2: continue in for loop
+    var sum2 = 0
+    for (var i = 0; i < 5; i = i + 1) {
+        if (i == 2) { continue }
+        sum2 = sum2 + i
+    }
+    println(sum2)  // Expected: 8 (0+1+3+4)
+
+    // Test 3: break in while-style for loop
+    var n = 10
+    var count = 0
+    for (n > 0) {
+        if (n == 5) { break }
+        count = count + 1
+        n = n - 1
+    }
+    println(count)  // Expected: 5
+
+    // Test 4: continue in while-style for loop
+    var m = 5
+    var sum3 = 0
+    for (m > 0) {
+        m = m - 1
+        if (m == 2) { continue }
+        sum3 = sum3 + m
+    }
+    println(sum3)  // Expected: 7 (4+3+0+1)
+}
