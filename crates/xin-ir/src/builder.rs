@@ -555,7 +555,7 @@ impl IRBuilder {
                 // Track the type of the result variable
                 let result_type = self.get_expr_type_with_vars(then_expr)
                     .or_else(|| self.get_expr_type_with_vars(else_expr))
-                    .unwrap_or(Type::Int);
+                    .unwrap_or(Type::Int64);
                 self.variable_types.insert(result.0.clone(), result_type);
 
                 Some(result)
@@ -609,8 +609,26 @@ impl IRBuilder {
 
     fn convert_type(&self, ty: &Type) -> IRType {
         match ty {
-            Type::Int => IRType::I64,
-            Type::Float => IRType::F64,
+            // Signed integers
+            Type::Int8 => IRType::I8,
+            Type::Int16 => IRType::I16,
+            Type::Int32 => IRType::I32,
+            Type::Int64 => IRType::I64,
+            Type::Int128 => IRType::I128,
+            // Unsigned integers
+            Type::UInt8 => IRType::U8,
+            Type::UInt16 => IRType::U16,
+            Type::UInt32 => IRType::U32,
+            Type::UInt64 => IRType::U64,
+            Type::UInt128 => IRType::U128,
+            // Floats
+            Type::Float8 => IRType::F8,
+            Type::Float16 => IRType::F16,
+            Type::Float32 => IRType::F32,
+            Type::Float64 => IRType::F64,
+            Type::Float128 => IRType::F128,
+            // Other types
+            Type::Char => IRType::Char,
             Type::Bool => IRType::Bool,
             Type::String => IRType::String,
             Type::Void => IRType::Void,
@@ -689,7 +707,8 @@ impl IRBuilder {
         let arg_type = self.get_expr_type_with_vars(arg);
 
         match arg_type {
-            Some(Type::Int) => {
+            Some(t) if t.is_integer() => {
+                let ir_type = self.convert_type(&t);
                 self.emit(Instruction::Call {
                     result: None,
                     func: "xin_print_int".to_string(),
@@ -702,10 +721,11 @@ impl IRBuilder {
                     args: vec![],
                     is_extern: true,
                 });
-                self.declare_extern_if_needed("xin_print_int", vec![IRType::I64], None);
+                self.declare_extern_if_needed("xin_print_int", vec![ir_type], None);
                 self.declare_extern_if_needed("xin_println", vec![], None);
             }
-            Some(Type::Float) => {
+            Some(t) if t.is_float() => {
+                let ir_type = self.convert_type(&t);
                 self.emit(Instruction::Call {
                     result: None,
                     func: "xin_print_float".to_string(),
@@ -718,7 +738,7 @@ impl IRBuilder {
                     args: vec![],
                     is_extern: true,
                 });
-                self.declare_extern_if_needed("xin_print_float", vec![IRType::F64], None);
+                self.declare_extern_if_needed("xin_print_float", vec![ir_type], None);
                 self.declare_extern_if_needed("xin_println", vec![], None);
             }
             Some(Type::Bool) => {
@@ -785,23 +805,25 @@ impl IRBuilder {
         let arg_type = self.get_expr_type_with_vars(arg);
 
         match arg_type {
-            Some(Type::Int) => {
+            Some(t) if t.is_integer() => {
+                let ir_type = self.convert_type(&t);
                 self.emit(Instruction::Call {
                     result: None,
                     func: "xin_print_int".to_string(),
                     args: vec![arg_val],
                     is_extern: true,
                 });
-                self.declare_extern_if_needed("xin_print_int", vec![IRType::I64], None);
+                self.declare_extern_if_needed("xin_print_int", vec![ir_type], None);
             }
-            Some(Type::Float) => {
+            Some(t) if t.is_float() => {
+                let ir_type = self.convert_type(&t);
                 self.emit(Instruction::Call {
                     result: None,
                     func: "xin_print_float".to_string(),
                     args: vec![arg_val],
                     is_extern: true,
                 });
-                self.declare_extern_if_needed("xin_print_float", vec![IRType::F64], None);
+                self.declare_extern_if_needed("xin_print_float", vec![ir_type], None);
             }
             Some(Type::Bool) => {
                 self.emit(Instruction::Call {
@@ -850,10 +872,11 @@ impl IRBuilder {
                 arg_vals.push(val);
                 let arg_type = self.get_expr_type_with_vars(arg);
                 let ir_type = match arg_type {
-                    Some(Type::Int) => IRType::I64,
-                    Some(Type::Float) => IRType::F64,
+                    Some(t) if t.is_integer() => self.convert_type(&t),
+                    Some(t) if t.is_float() => self.convert_type(&t),
                     Some(Type::Bool) => IRType::Bool,
                     Some(Type::String) => IRType::Ptr("char".to_string()),
+                    Some(Type::Char) => IRType::Char,
                     _ => IRType::I64,
                 };
                 param_types.push(ir_type.clone());
@@ -910,8 +933,8 @@ impl IRBuilder {
     /// Get the type of an expression (simplified)
     fn get_expr_type(expr: &Expr) -> Option<Type> {
         match &expr.kind {
-            ExprKind::IntLiteral(_) => Some(Type::Int),
-            ExprKind::FloatLiteral(_) => Some(Type::Float),
+            ExprKind::IntLiteral(_) => Some(Type::Int64),
+            ExprKind::FloatLiteral(_) => Some(Type::Float64),
             ExprKind::BoolLiteral(_) => Some(Type::Bool),
             ExprKind::StringLiteral(_) => Some(Type::String),
             ExprKind::Ident(_) => None, // Would need symbol table
@@ -957,8 +980,8 @@ impl IRBuilder {
     /// Infer AST type from an expression
     fn infer_ast_type(&self, expr: &Expr) -> Type {
         match &expr.kind {
-            ExprKind::IntLiteral(_) => Type::Int,
-            ExprKind::FloatLiteral(_) => Type::Float,
+            ExprKind::IntLiteral(_) => Type::Int64,
+            ExprKind::FloatLiteral(_) => Type::Float64,
             ExprKind::BoolLiteral(_) => Type::Bool,
             ExprKind::StringLiteral(_) => Type::String,
             ExprKind::Binary { op, left, right } => {
@@ -969,28 +992,28 @@ impl IRBuilder {
                         return Type::String;
                     }
                 }
-                Type::Int
+                Type::Int64
             }
             ExprKind::Conditional { condition: _, then_expr, else_expr } => {
                 let then_type = self.infer_ast_type(then_expr);
                 let else_type = self.infer_ast_type(else_expr);
-                if then_type != Type::Int {
+                if !then_type.is_numeric() {
                     then_type
-                } else if else_type != Type::Int {
+                } else if !else_type.is_numeric() {
                     else_type
                 } else {
-                    Type::Int
+                    Type::Int64
                 }
             }
-            _ => Type::Int,
+            _ => Type::Int64,
         }
     }
 
     /// Get the type of an expression (with variable type tracking)
     fn get_expr_type_with_vars(&self, expr: &Expr) -> Option<Type> {
         match &expr.kind {
-            ExprKind::IntLiteral(_) => Some(Type::Int),
-            ExprKind::FloatLiteral(_) => Some(Type::Float),
+            ExprKind::IntLiteral(_) => Some(Type::Int64),
+            ExprKind::FloatLiteral(_) => Some(Type::Float64),
             ExprKind::BoolLiteral(_) => Some(Type::Bool),
             ExprKind::StringLiteral(_) => Some(Type::String),
             ExprKind::TemplateLiteral(_) => Some(Type::String),
@@ -1008,15 +1031,15 @@ impl IRBuilder {
                 match op {
                     AstBinOp::Eq | AstBinOp::Ne | AstBinOp::Lt | AstBinOp::Gt | AstBinOp::Le | AstBinOp::Ge => Some(Type::Bool),
                     AstBinOp::And | AstBinOp::Or => Some(Type::Bool),
-                    _ => Some(Type::Int),
+                    _ => Some(Type::Int64),
                 }
             }
             ExprKind::Conditional { condition: _, then_expr, else_expr } => {
                 // The type of a conditional is the type of its branches
                 let then_type = self.get_expr_type_with_vars(then_expr);
                 let else_type = self.get_expr_type_with_vars(else_expr);
-                // Prefer then_type, fall back to else_type, then Int as default
-                then_type.or(else_type).or(Some(Type::Int))
+                // Prefer then_type, fall back to else_type, then Int64 as default
+                then_type.or(else_type).or(Some(Type::Int64))
             }
             ExprKind::Call { callee, args: _ } => {
                 // Look up the function return type
@@ -1037,8 +1060,22 @@ impl IRBuilder {
     /// Convert IRType back to Type
     fn ir_type_to_type(&self, ty: &IRType) -> Type {
         match ty {
-            IRType::I64 => Type::Int,
-            IRType::F64 => Type::Float,
+            IRType::I8 => Type::Int8,
+            IRType::I16 => Type::Int16,
+            IRType::I32 => Type::Int32,
+            IRType::I64 => Type::Int64,
+            IRType::I128 => Type::Int128,
+            IRType::U8 => Type::UInt8,
+            IRType::U16 => Type::UInt16,
+            IRType::U32 => Type::UInt32,
+            IRType::U64 => Type::UInt64,
+            IRType::U128 => Type::UInt128,
+            IRType::F8 => Type::Float8,
+            IRType::F16 => Type::Float16,
+            IRType::F32 => Type::Float32,
+            IRType::F64 => Type::Float64,
+            IRType::F128 => Type::Float128,
+            IRType::Char => Type::Char,
             IRType::Bool => Type::Bool,
             IRType::String => Type::String,
             IRType::Void => Type::Void,
@@ -1050,8 +1087,8 @@ impl IRBuilder {
     /// Convert Type to ConcatType
     fn type_to_concat_type(&self, ty: &Option<Type>) -> ConcatType {
         match ty {
-            Some(Type::Int) => ConcatType::Int,
-            Some(Type::Float) => ConcatType::Float,
+            Some(t) if t.is_integer() => ConcatType::Int,
+            Some(t) if t.is_float() => ConcatType::Float,
             Some(Type::Bool) => ConcatType::Bool,
             Some(Type::String) | None => ConcatType::String,
             _ => ConcatType::String,
@@ -1123,30 +1160,32 @@ impl IRBuilder {
     fn convert_to_string(&mut self, value: Value, ty: Option<Type>) -> Value {
         match ty {
             Some(Type::String) => value,
-            Some(Type::Int) => {
+            Some(t) if t.is_integer() => {
+                let ir_type = self.convert_type(&t);
                 let result = self.new_temp();
                 self.emit(Instruction::ToString {
                     result: result.clone(),
                     value,
-                    from_type: IRType::I64,
+                    from_type: ir_type.clone(),
                 });
                 self.declare_extern_if_needed(
                     "xin_int_to_str",
-                    vec![IRType::I64],
+                    vec![ir_type],
                     Some(IRType::Ptr("char".to_string())),
                 );
                 result
             }
-            Some(Type::Float) => {
+            Some(t) if t.is_float() => {
+                let ir_type = self.convert_type(&t);
                 let result = self.new_temp();
                 self.emit(Instruction::ToString {
                     result: result.clone(),
                     value,
-                    from_type: IRType::F64,
+                    from_type: ir_type.clone(),
                 });
                 self.declare_extern_if_needed(
                     "xin_float_to_str",
-                    vec![IRType::F64],
+                    vec![ir_type],
                     Some(IRType::Ptr("char".to_string())),
                 );
                 result

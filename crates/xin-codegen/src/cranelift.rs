@@ -225,8 +225,22 @@ impl CodeGenerator {
 
     fn convert_type(&self, ty: &IRType) -> Type {
         match ty {
+            IRType::I8 => types::I8,
+            IRType::I16 => types::I16,
+            IRType::I32 => types::I32,
             IRType::I64 => types::I64,
+            IRType::I128 => types::I128,
+            IRType::U8 => types::I8,
+            IRType::U16 => types::I16,
+            IRType::U32 => types::I32,
+            IRType::U64 => types::I64,
+            IRType::U128 => types::I128,
+            IRType::F8 => types::F32,
+            IRType::F16 => types::F32,
+            IRType::F32 => types::F32,
             IRType::F64 => types::F64,
+            IRType::F128 => types::F64,
+            IRType::Char => types::I32,
             IRType::Bool => types::I8,
             IRType::String => types::I64, // String as pointer
             IRType::Void => panic!("Void type should not be converted to Cranelift type"),

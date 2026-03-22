@@ -14,7 +14,7 @@ fn test_parser_basic() {
     use xin_parser::Parser;
 
     let source = r#"
-        func add(a: int, b: int) int {
+        func add(a: int64, b: int64) int64 {
             return a + b
         }
     "#;
@@ -53,7 +53,7 @@ fn test_ir_builder_basic() {
     use xin_ir::IRBuilder;
 
     let source = r#"
-        func add(a: int, b: int) int {
+        func add(a: int64, b: int64) int64 {
             return a + b
         }
     "#;

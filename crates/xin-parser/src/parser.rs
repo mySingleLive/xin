@@ -1286,8 +1286,23 @@ impl Parser {
     fn check_type_start(&self) -> bool {
         matches!(
             self.peek().kind,
-            TokenKind::Int
-                | TokenKind::Float
+            TokenKind::Int8
+                | TokenKind::Int16
+                | TokenKind::Int32
+                | TokenKind::Int64
+                | TokenKind::Int128
+                | TokenKind::UInt8
+                | TokenKind::UInt16
+                | TokenKind::UInt32
+                | TokenKind::UInt64
+                | TokenKind::UInt128
+                | TokenKind::Byte
+                | TokenKind::Float8
+                | TokenKind::Float16
+                | TokenKind::Float32
+                | TokenKind::Float64
+                | TokenKind::Float128
+                | TokenKind::Char
                 | TokenKind::Bool
                 | TokenKind::String
                 | TokenKind::Void
@@ -1453,13 +1468,77 @@ impl Parser {
 
     fn parse_base_type(&mut self) -> Result<Type, ParserError> {
         match self.peek().kind {
-            TokenKind::Int => {
+            // Signed integer types
+            TokenKind::Int8 => {
                 self.advance();
-                Ok(Type::Int)
+                Ok(Type::Int8)
             }
-            TokenKind::Float => {
+            TokenKind::Int16 => {
                 self.advance();
-                Ok(Type::Float)
+                Ok(Type::Int16)
+            }
+            TokenKind::Int32 => {
+                self.advance();
+                Ok(Type::Int32)
+            }
+            TokenKind::Int64 => {
+                self.advance();
+                Ok(Type::Int64)
+            }
+            TokenKind::Int128 => {
+                self.advance();
+                Ok(Type::Int128)
+            }
+            // Unsigned integer types
+            TokenKind::UInt8 => {
+                self.advance();
+                Ok(Type::UInt8)
+            }
+            TokenKind::UInt16 => {
+                self.advance();
+                Ok(Type::UInt16)
+            }
+            TokenKind::UInt32 => {
+                self.advance();
+                Ok(Type::UInt32)
+            }
+            TokenKind::UInt64 => {
+                self.advance();
+                Ok(Type::UInt64)
+            }
+            TokenKind::UInt128 => {
+                self.advance();
+                Ok(Type::UInt128)
+            }
+            TokenKind::Byte => {
+                self.advance();
+                Ok(Type::UInt8) // byte is an alias for uint8
+            }
+            // Float types
+            TokenKind::Float8 => {
+                self.advance();
+                Ok(Type::Float8)
+            }
+            TokenKind::Float16 => {
+                self.advance();
+                Ok(Type::Float16)
+            }
+            TokenKind::Float32 => {
+                self.advance();
+                Ok(Type::Float32)
+            }
+            TokenKind::Float64 => {
+                self.advance();
+                Ok(Type::Float64)
+            }
+            TokenKind::Float128 => {
+                self.advance();
+                Ok(Type::Float128)
+            }
+            // Other types
+            TokenKind::Char => {
+                self.advance();
+                Ok(Type::Char)
             }
             TokenKind::Bool => {
                 self.advance();

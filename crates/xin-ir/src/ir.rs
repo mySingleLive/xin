@@ -15,8 +15,26 @@ impl fmt::Display for Value {
 /// IR Types
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IRType {
+    // Signed integers
+    I8,
+    I16,
+    I32,
     I64,
+    I128,
+    // Unsigned integers
+    U8,
+    U16,
+    U32,
+    U64,
+    U128,
+    // Floats
+    F8,
+    F16,
+    F32,
     F64,
+    F128,
+    // Other types
+    Char,
     Bool,
     String,
     Void,
@@ -27,8 +45,26 @@ pub enum IRType {
 impl fmt::Display for IRType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            // Signed integers
+            IRType::I8 => write!(f, "i8"),
+            IRType::I16 => write!(f, "i16"),
+            IRType::I32 => write!(f, "i32"),
             IRType::I64 => write!(f, "i64"),
+            IRType::I128 => write!(f, "i128"),
+            // Unsigned integers
+            IRType::U8 => write!(f, "u8"),
+            IRType::U16 => write!(f, "u16"),
+            IRType::U32 => write!(f, "u32"),
+            IRType::U64 => write!(f, "u64"),
+            IRType::U128 => write!(f, "u128"),
+            // Floats
+            IRType::F8 => write!(f, "f8"),
+            IRType::F16 => write!(f, "f16"),
+            IRType::F32 => write!(f, "f32"),
             IRType::F64 => write!(f, "f64"),
+            IRType::F128 => write!(f, "f128"),
+            // Other types
+            IRType::Char => write!(f, "char"),
             IRType::Bool => write!(f, "bool"),
             IRType::String => write!(f, "string"),
             IRType::Void => write!(f, "void"),

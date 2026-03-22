@@ -35,10 +35,29 @@ pub enum TokenKind {
     Move,
 
     // Types
-    Int,
-    Float,
+    // Signed integers
+    Int8,
+    Int16,
+    Int32,
+    Int64,
+    Int128,
+    // Unsigned integers
+    UInt8,
+    UInt16,
+    UInt32,
+    UInt64,
+    UInt128,
+    Byte,
+    // Floats
+    Float8,
+    Float16,
+    Float32,
+    Float64,
+    Float128,
+    // Other types
     Bool,
     String,
+    Char,
     Void,
 
     // Operators
@@ -112,10 +131,29 @@ impl fmt::Display for TokenKind {
             TokenKind::True => write!(f, "true"),
             TokenKind::False => write!(f, "false"),
             TokenKind::Move => write!(f, "move"),
-            TokenKind::Int => write!(f, "int"),
-            TokenKind::Float => write!(f, "float"),
+            // Types - Signed integers
+            TokenKind::Int8 => write!(f, "int8"),
+            TokenKind::Int16 => write!(f, "int16"),
+            TokenKind::Int32 => write!(f, "int32"),
+            TokenKind::Int64 => write!(f, "int64"),
+            TokenKind::Int128 => write!(f, "int128"),
+            // Types - Unsigned integers
+            TokenKind::UInt8 => write!(f, "uint8"),
+            TokenKind::UInt16 => write!(f, "uint16"),
+            TokenKind::UInt32 => write!(f, "uint32"),
+            TokenKind::UInt64 => write!(f, "uint64"),
+            TokenKind::UInt128 => write!(f, "uint128"),
+            TokenKind::Byte => write!(f, "byte"),
+            // Types - Floats
+            TokenKind::Float8 => write!(f, "float8"),
+            TokenKind::Float16 => write!(f, "float16"),
+            TokenKind::Float32 => write!(f, "float32"),
+            TokenKind::Float64 => write!(f, "float64"),
+            TokenKind::Float128 => write!(f, "float128"),
+            // Types - Other
             TokenKind::Bool => write!(f, "bool"),
             TokenKind::String => write!(f, "string"),
+            TokenKind::Char => write!(f, "char"),
             TokenKind::Void => write!(f, "void"),
             TokenKind::Plus => write!(f, "+"),
             TokenKind::Minus => write!(f, "-"),
@@ -185,5 +223,38 @@ impl Token {
             line,
             column,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_type_tokens() {
+        // 有符号整数
+        assert_eq!(TokenKind::Int8.to_string(), "int8");
+        assert_eq!(TokenKind::Int16.to_string(), "int16");
+        assert_eq!(TokenKind::Int32.to_string(), "int32");
+        assert_eq!(TokenKind::Int64.to_string(), "int64");
+        assert_eq!(TokenKind::Int128.to_string(), "int128");
+
+        // 无符号整数
+        assert_eq!(TokenKind::UInt8.to_string(), "uint8");
+        assert_eq!(TokenKind::UInt16.to_string(), "uint16");
+        assert_eq!(TokenKind::UInt32.to_string(), "uint32");
+        assert_eq!(TokenKind::UInt64.to_string(), "uint64");
+        assert_eq!(TokenKind::UInt128.to_string(), "uint128");
+        assert_eq!(TokenKind::Byte.to_string(), "byte");
+
+        // 浮点数
+        assert_eq!(TokenKind::Float8.to_string(), "float8");
+        assert_eq!(TokenKind::Float16.to_string(), "float16");
+        assert_eq!(TokenKind::Float32.to_string(), "float32");
+        assert_eq!(TokenKind::Float64.to_string(), "float64");
+        assert_eq!(TokenKind::Float128.to_string(), "float128");
+
+        // 字符
+        assert_eq!(TokenKind::Char.to_string(), "char");
     }
 }

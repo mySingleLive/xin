@@ -655,13 +655,13 @@ impl AOTCodeGenerator {
             Instruction::Alloca { result, ty } => {
                 // Create a stack slot for the variable
                 let size = match ty {
-                    IRType::I64 => 8,
-                    IRType::F64 => 8,
-                    IRType::Bool => 1,
-                    IRType::String => 8, // pointer size
-                    IRType::Ptr(_) => 8,
+                    IRType::I8 | IRType::U8 | IRType::Bool | IRType::Char => 1,
+                    IRType::I16 | IRType::U16 | IRType::F8 | IRType::F16 => 2,
+                    IRType::I32 | IRType::U32 | IRType::F32 => 4,
+                    IRType::I64 | IRType::U64 | IRType::F64 => 8,
+                    IRType::I128 | IRType::U128 | IRType::F128 => 16,
+                    IRType::String | IRType::Ptr(_) | IRType::Object => 8, // pointer size
                     IRType::Void => 0,
-                    IRType::Object => 8, // pointer size for arrays
                 };
                 let slot = builder.create_sized_stack_slot(cranelift::codegen::ir::StackSlotData::new(
                     cranelift::codegen::ir::StackSlotKind::ExplicitSlot,
@@ -1029,8 +1029,22 @@ impl AOTCodeGenerator {
 
     fn convert_type(&self, ty: &IRType) -> Type {
         match ty {
+            IRType::I8 => types::I8,
+            IRType::I16 => types::I16,
+            IRType::I32 => types::I32,
             IRType::I64 => types::I64,
+            IRType::I128 => types::I128,
+            IRType::U8 => types::I8,
+            IRType::U16 => types::I16,
+            IRType::U32 => types::I32,
+            IRType::U64 => types::I64,
+            IRType::U128 => types::I128,
+            IRType::F8 => types::F32,  // No F8 in cranelift, use F32
+            IRType::F16 => types::F32, // No F16 in cranelift, use F32
+            IRType::F32 => types::F32,
             IRType::F64 => types::F64,
+            IRType::F128 => types::F64, // No F128 in cranelift, use F64
+            IRType::Char => types::I32, // Char is represented as I32 (Unicode code point)
             IRType::Bool => types::I64, // Use I64 for bool to match logical operators
             IRType::String => self.pointer_type,
             IRType::Void => panic!("Void type should not be converted to Cranelift type"),

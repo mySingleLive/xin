@@ -25,10 +25,29 @@ const KEYWORDS: &[(&str, TokenKind)] = &[
     ("true", TokenKind::True),
     ("false", TokenKind::False),
     ("move", TokenKind::Move),
-    ("int", TokenKind::Int),
-    ("float", TokenKind::Float),
+    // Signed integer types
+    ("int8", TokenKind::Int8),
+    ("int16", TokenKind::Int16),
+    ("int32", TokenKind::Int32),
+    ("int64", TokenKind::Int64),
+    ("int128", TokenKind::Int128),
+    // Unsigned integer types
+    ("uint8", TokenKind::UInt8),
+    ("uint16", TokenKind::UInt16),
+    ("uint32", TokenKind::UInt32),
+    ("uint64", TokenKind::UInt64),
+    ("uint128", TokenKind::UInt128),
+    ("byte", TokenKind::Byte),
+    // Float types
+    ("float8", TokenKind::Float8),
+    ("float16", TokenKind::Float16),
+    ("float32", TokenKind::Float32),
+    ("float64", TokenKind::Float64),
+    ("float128", TokenKind::Float128),
+    // Other types
     ("bool", TokenKind::Bool),
     ("string", TokenKind::String),
+    ("char", TokenKind::Char),
     ("void", TokenKind::Void),
 ];
 

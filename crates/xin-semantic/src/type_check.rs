@@ -381,8 +381,8 @@ impl TypeChecker {
 
     fn check_expr(&mut self, expr: &Expr) -> Result<Type, SemanticError> {
         match &expr.kind {
-            ExprKind::IntLiteral(_) => Ok(Type::Int),
-            ExprKind::FloatLiteral(_) => Ok(Type::Float),
+            ExprKind::IntLiteral(_) => Ok(Type::Int64),
+            ExprKind::FloatLiteral(_) => Ok(Type::Float64),
             ExprKind::StringLiteral(_) => Ok(Type::String),
             ExprKind::BoolLiteral(_) => Ok(Type::Bool),
             ExprKind::Null => Ok(Type::Nullable(Box::new(Type::Void))),
@@ -408,39 +408,33 @@ impl TypeChecker {
                 match op {
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
                         // String concatenation: if either side is string, result is string
-                        if left_type == Type::String || right_type == Type::String {
-                            if *op == BinOp::Add {
-                                // Allow string concatenation with any basic type
-                                match (&left_type, &right_type) {
-                                    (Type::String, Type::String)
-                                    | (Type::String, Type::Int)
-                                    | (Type::String, Type::Float)
-                                    | (Type::String, Type::Bool)
-                                    | (Type::Int, Type::String)
-                                    | (Type::Float, Type::String)
-                                    | (Type::Bool, Type::String) => {
-                                        return Ok(Type::String);
-                                    }
-                                    _ => {
-                                        // Determine which type doesn't support string concatenation
-                                        let unsupported_type = match (&left_type, &right_type) {
-                                            (Type::String, _) => right_type.clone(),
-                                            (_, Type::String) => left_type.clone(),
-                                            _ => right_type.clone(),
-                                        };
-                                        return Err(SemanticError::TypeMismatch {
-                                            expected: Type::String,
-                                            found: unsupported_type,
-                                        });
-                                    }
-                                }
+                        if *op == BinOp::Add && (left_type == Type::String || right_type == Type::String) {
+                            // Allow string concatenation with any basic type
+                            let is_valid_concat = match (&left_type, &right_type) {
+                                (Type::String, Type::String) => true,
+                                (Type::String, right) if right.is_numeric() || right == &Type::Bool => true,
+                                (left, Type::String) if left.is_numeric() || left == &Type::Bool => true,
+                                _ => false,
+                            };
+                            if is_valid_concat {
+                                return Ok(Type::String);
                             }
+                            // Determine which type doesn't support string concatenation
+                            let unsupported_type = match (&left_type, &right_type) {
+                                (Type::String, _) => right_type.clone(),
+                                (_, Type::String) => left_type.clone(),
+                                _ => right_type.clone(),
+                            };
+                            return Err(SemanticError::TypeMismatch {
+                                expected: Type::String,
+                                found: unsupported_type,
+                            });
                         }
                         // Numeric operations
-                        if left_type == Type::Int && right_type == Type::Int {
-                            Ok(Type::Int)
-                        } else if left_type == Type::Float || right_type == Type::Float {
-                            Ok(Type::Float)
+                        if left_type.is_numeric() && right_type.is_numeric() {
+                            // For simplicity, return the left type for now
+                            // TODO: implement proper numeric type promotion
+                            Ok(left_type)
                         } else {
                             Err(SemanticError::TypeMismatch {
                                 expected: left_type.clone(),
@@ -450,11 +444,11 @@ impl TypeChecker {
                     }
                     BinOp::Eq | BinOp::Ne => Ok(Type::Bool),
                     BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
-                        if left_type == Type::Int || left_type == Type::Float {
+                        if left_type.is_numeric() {
                             Ok(Type::Bool)
                         } else {
                             Err(SemanticError::TypeMismatch {
-                                expected: Type::Int,
+                                expected: Type::Int64,
                                 found: left_type,
                             })
                         }
@@ -481,11 +475,11 @@ impl TypeChecker {
                 let operand_type = self.check_expr(operand)?;
                 match op {
                     UnaryOp::Neg => {
-                        if operand_type == Type::Int || operand_type == Type::Float {
+                        if operand_type.is_numeric() {
                             Ok(operand_type)
                         } else {
                             Err(SemanticError::TypeMismatch {
-                                expected: Type::Int,
+                                expected: Type::Int64,
                                 found: operand_type,
                             })
                         }
@@ -680,7 +674,7 @@ impl TypeChecker {
                                     found: args.len(),
                                 });
                             }
-                            return Ok(Type::Int);
+                            return Ok(Type::Int64);
                         }
                         _ => {}
                     }
@@ -818,9 +812,9 @@ impl TypeChecker {
                 let obj_type = self.check_expr(object)?;
                 let idx_type = self.check_expr(index)?;
 
-                if idx_type != Type::Int {
+                if !idx_type.is_integer() {
                     return Err(SemanticError::TypeMismatch {
-                        expected: Type::Int,
+                        expected: Type::Int64,
                         found: idx_type,
                     });
                 }
@@ -1039,7 +1033,11 @@ impl TypeChecker {
 
     fn check_type_exists(&self, ty: &Type) -> Result<(), SemanticError> {
         match ty {
-            Type::Int | Type::Float | Type::Bool | Type::String | Type::Void | Type::Object => Ok(()),
+            // All primitive types are valid
+            Type::Int8 | Type::Int16 | Type::Int32 | Type::Int64 | Type::Int128
+            | Type::UInt8 | Type::UInt16 | Type::UInt32 | Type::UInt64 | Type::UInt128
+            | Type::Float8 | Type::Float16 | Type::Float32 | Type::Float64 | Type::Float128
+            | Type::Char | Type::Bool | Type::String | Type::Void | Type::Object => Ok(()),
             Type::Named(name) => {
                 if self.scopes.lookup(name).is_none() {
                     Err(SemanticError::UndefinedType(name.clone()))
@@ -1071,8 +1069,13 @@ impl TypeChecker {
 
     fn types_compatible(&self, expected: &Type, found: &Type) -> bool {
         match (expected, found) {
-            (Type::Int, Type::Int) => true,
-            (Type::Float, Type::Float) => true,
+            // Integer types are compatible if same bit width
+            (a, b) if a.is_integer() && b.is_integer() => {
+                a.integer_bit_width() == b.integer_bit_width()
+            }
+            // Float types are compatible if same type
+            (a, b) if a.is_float() && b.is_float() => a == b,
+            (Type::Char, Type::Char) => true,
             (Type::Bool, Type::Bool) => true,
             (Type::String, Type::String) => true,
             (Type::Void, Type::Void) => true,
@@ -1108,7 +1111,7 @@ impl TypeChecker {
     }
 
     fn is_stringifiable(&self, ty: &Type) -> bool {
-        matches!(ty, Type::Int | Type::Float | Type::Bool | Type::String)
+        ty.is_numeric() || matches!(ty, Type::Bool | Type::String | Type::Char)
     }
 
     /// Parse printf format string and return expected types
@@ -1137,10 +1140,10 @@ impl TypeChecker {
                 match chars[i] {
                     '%' => {} // Escaped %, no argument
                     'd' | 'i' | 'x' | 'X' | 'o' | 'c' | 'l' => {
-                        types.push(Type::Int);
+                        types.push(Type::Int64);
                     }
                     'f' => {
-                        types.push(Type::Float);
+                        types.push(Type::Float64);
                     }
                     's' => {
                         types.push(Type::String);
