@@ -310,3 +310,190 @@ fn test_ir_safe_navigation() {
         assert!(has_phi, "SafeAccess/Elvis should generate Phi instruction");
     }
 }
+
+// ==================== Lambda Tests ====================
+
+#[test]
+fn test_ir_lambda_basic() {
+    use xin_lexer::Lexer;
+    use xin_parser::Parser;
+    use xin_semantic::TypeChecker;
+    use xin_ir::IRBuilder;
+
+    // Basic lambda with expression body
+    let source = r#"
+        func main() {
+            let f = (x: int64, y: int64) -> x + y
+        }
+    "#;
+    let mut lexer = Lexer::new(source);
+    let mut parser = Parser::new(&mut lexer).unwrap();
+    let ast = parser.parse().unwrap();
+
+    let mut type_checker = TypeChecker::new();
+    type_checker.check(&ast).unwrap();
+
+    let mut ir_builder = IRBuilder::new();
+    let ir_module = ir_builder.build(&ast);
+
+    // Should have main function and a lambda function
+    assert!(ir_module.functions.len() >= 2, "Should have main function and lambda function");
+
+    // Check that there's a lambda function
+    let has_lambda = ir_module.functions.iter().any(|f| f.name.starts_with("__lambda_"));
+    assert!(has_lambda, "Should have a lambda function");
+
+    // Check that main function contains a LambdaRef instruction
+    let main_func = ir_module.functions.iter().find(|f| f.name == "main");
+    if let Some(func) = main_func {
+        let has_lambda_ref = func.instructions.iter().any(|instr| {
+            matches!(instr, xin_ir::Instruction::LambdaRef { .. })
+        });
+        assert!(has_lambda_ref, "Main function should contain LambdaRef instruction");
+    }
+}
+
+#[test]
+fn test_ir_lambda_no_params() {
+    use xin_lexer::Lexer;
+    use xin_parser::Parser;
+    use xin_semantic::TypeChecker;
+    use xin_ir::IRBuilder;
+
+    // Lambda with no parameters
+    let source = r#"
+        func main() {
+            let f = () -> 42
+        }
+    "#;
+    let mut lexer = Lexer::new(source);
+    let mut parser = Parser::new(&mut lexer).unwrap();
+    let ast = parser.parse().unwrap();
+
+    let mut type_checker = TypeChecker::new();
+    type_checker.check(&ast).unwrap();
+
+    let mut ir_builder = IRBuilder::new();
+    let ir_module = ir_builder.build(&ast);
+
+    // Should have at least main function
+    assert!(ir_module.functions.len() >= 1);
+
+    // Check that there's a lambda function
+    let has_lambda = ir_module.functions.iter().any(|f| f.name.starts_with("__lambda_"));
+    assert!(has_lambda, "Should have a lambda function");
+}
+
+#[test]
+fn test_ir_lambda_block_body() {
+    use xin_lexer::Lexer;
+    use xin_parser::Parser;
+    use xin_semantic::TypeChecker;
+    use xin_ir::IRBuilder;
+
+    // Lambda with block body
+    let source = r#"
+        func main() {
+            let f = (x: int64) -> {
+                let y = x * 2
+                return y
+            }
+        }
+    "#;
+    let mut lexer = Lexer::new(source);
+    let mut parser = Parser::new(&mut lexer).unwrap();
+    let ast = parser.parse().unwrap();
+
+    let mut type_checker = TypeChecker::new();
+    type_checker.check(&ast).unwrap();
+
+    let mut ir_builder = IRBuilder::new();
+    let ir_module = ir_builder.build(&ast);
+
+    // Check that there's a lambda function with a body
+    let lambda_func = ir_module.functions.iter().find(|f| f.name.starts_with("__lambda_"));
+    assert!(lambda_func.is_some(), "Should have a lambda function");
+
+    // Lambda should have some instructions in its body
+    if let Some(func) = lambda_func {
+        assert!(!func.instructions.is_empty(), "Lambda function should have instructions");
+    }
+}
+
+#[test]
+fn test_ir_lambda_direct_call() {
+    use xin_lexer::Lexer;
+    use xin_parser::Parser;
+    use xin_semantic::TypeChecker;
+    use xin_ir::IRBuilder;
+
+    // Lambda called directly
+    let source = r#"
+        func main() {
+            let result = ((a: int64, b: int64) -> a + b)(10, 20)
+        }
+    "#;
+    let mut lexer = Lexer::new(source);
+    let mut parser = Parser::new(&mut lexer).unwrap();
+    let ast = parser.parse().unwrap();
+
+    let mut type_checker = TypeChecker::new();
+    type_checker.check(&ast).unwrap();
+
+    let mut ir_builder = IRBuilder::new();
+    let ir_module = ir_builder.build(&ast);
+
+    // Should have main function and a lambda function
+    assert!(ir_module.functions.len() >= 2, "Should have main and lambda functions");
+
+    // Check that main function contains both LambdaRef and IndirectCall
+    let main_func = ir_module.functions.iter().find(|f| f.name == "main");
+    if let Some(func) = main_func {
+        let has_lambda_ref = func.instructions.iter().any(|instr| {
+            matches!(instr, xin_ir::Instruction::LambdaRef { .. })
+        });
+        let has_indirect_call = func.instructions.iter().any(|instr| {
+            matches!(instr, xin_ir::Instruction::IndirectCall { .. })
+        });
+        assert!(has_lambda_ref, "Main should have LambdaRef");
+        assert!(has_indirect_call, "Main should have IndirectCall for lambda invocation");
+    }
+}
+
+#[test]
+fn test_ir_lambda_stored_and_called() {
+    use xin_lexer::Lexer;
+    use xin_parser::Parser;
+    use xin_semantic::TypeChecker;
+    use xin_ir::IRBuilder;
+
+    // Lambda stored in variable and called later
+    let source = r#"
+        func main() {
+            let add = (a: int64, b: int64) -> a + b
+            let result = add(1, 2)
+        }
+    "#;
+    let mut lexer = Lexer::new(source);
+    let mut parser = Parser::new(&mut lexer).unwrap();
+    let ast = parser.parse().unwrap();
+
+    let mut type_checker = TypeChecker::new();
+    type_checker.check(&ast).unwrap();
+
+    let mut ir_builder = IRBuilder::new();
+    let ir_module = ir_builder.build(&ast);
+
+    // Check that main function contains both LambdaRef and IndirectCall
+    let main_func = ir_module.functions.iter().find(|f| f.name == "main");
+    if let Some(func) = main_func {
+        let has_lambda_ref = func.instructions.iter().any(|instr| {
+            matches!(instr, xin_ir::Instruction::LambdaRef { .. })
+        });
+        let has_indirect_call = func.instructions.iter().any(|instr| {
+            matches!(instr, xin_ir::Instruction::IndirectCall { .. })
+        });
+        assert!(has_lambda_ref, "Main should have LambdaRef for lambda assignment");
+        assert!(has_indirect_call, "Main should have IndirectCall for calling stored lambda");
+    }
+}

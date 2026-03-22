@@ -264,6 +264,47 @@ impl CodeGenerator {
                     self.store_variable(builder, result, val, variables, var_counter);
                 }
             }
+            Instruction::LambdaRef { result, func_name: _ } => {
+                // For JIT, we would need to get the function address
+                // For now, store a placeholder (the actual function would need to be compiled)
+                let val = builder.ins().iconst(types::I64, 0);
+                self.store_variable(builder, result, val, variables, var_counter);
+            }
+            Instruction::IndirectCall { result, func_ptr, args } => {
+                // Load the function pointer
+                let ptr_val = self.load_variable(builder, func_ptr, variables)?;
+
+                // Build argument values
+                let arg_vals: Vec<Value> = args
+                    .iter()
+                    .filter_map(|a| self.load_variable(builder, a, variables).ok())
+                    .collect();
+
+                // For indirect calls in JIT, create a simple signature
+                let mut sig = builder.func.signature.clone();
+                for _ in &arg_vals {
+                    sig.params.push(AbiParam::new(types::I64));
+                }
+                if result.is_some() {
+                    sig.returns.push(AbiParam::new(types::I64));
+                }
+
+                let sig_ref = builder.func.import_signature(sig);
+
+                // Create an indirect function call
+                let call = builder.ins().call_indirect(sig_ref, ptr_val, &arg_vals);
+
+                // Store the result if present
+                if let Some(res) = result {
+                    let return_vals = builder.inst_results(call);
+                    if !return_vals.is_empty() {
+                        self.store_variable(builder, res, return_vals[0], variables, var_counter);
+                    } else {
+                        let default = builder.ins().iconst(types::I64, 0);
+                        self.store_variable(builder, res, default, variables, var_counter);
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())

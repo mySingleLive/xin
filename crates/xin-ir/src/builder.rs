@@ -2,11 +2,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use xin_ast::{BinOp as AstBinOp, Decl, DeclKind, Expr, ExprKind, FuncDecl, SourceFile, Stmt, StmtKind, TemplatePart, Type};
+use xin_ast::{BinOp as AstBinOp, Decl, DeclKind, Expr, ExprKind, FuncDecl, LambdaBody, LambdaParam, SourceFile, Stmt, StmtKind, TemplatePart, Type};
 
 use crate::{BinOp, ConcatType, ExternFunction, Instruction, IRFunction, IRModule, IRType, Value};
 
 /// Loop context for break/continue
+#[derive(Clone)]
 struct LoopContext {
     break_label: String,
     continue_label: String,
@@ -26,6 +27,10 @@ pub struct IRBuilder {
     current_block: Option<String>,
     /// Loop context stack for break/continue
     loop_stack: Vec<LoopContext>,
+    /// Lambda function counter for unique naming
+    lambda_counter: usize,
+    /// Pending lambda functions to be added to module
+    pending_lambdas: Vec<IRFunction>,
 }
 
 impl IRBuilder {
@@ -39,12 +44,18 @@ impl IRBuilder {
             blocks: HashSet::new(),
             current_block: None,
             loop_stack: Vec::new(),
+            lambda_counter: 0,
+            pending_lambdas: Vec::new(),
         }
     }
 
     pub fn build(&mut self, file: &SourceFile) -> IRModule {
         for decl in &file.declarations {
             self.build_declaration(decl);
+        }
+        // Add any pending lambda functions to the module
+        for lambda_func in self.pending_lambdas.drain(..) {
+            self.module.add_function(lambda_func);
         }
         self.module.clone()
     }
@@ -494,6 +505,10 @@ impl IRBuilder {
                 Some(result)
             }
             ExprKind::Call { callee, args } => {
+                // First, build the callee expression to determine if it's a lambda reference
+                let callee_val = self.build_expr(callee);
+
+                // Check if callee is a lambda reference (LambdaRef) or an identifier
                 match &callee.kind {
                     ExprKind::Ident(name) => {
                         // Handle println/print specially
@@ -510,18 +525,66 @@ impl IRBuilder {
                             return self.handle_type_conversion(name, args, target_type);
                         }
 
-                        // Regular function call
-                        let arg_vals: Vec<Value> = args.iter().filter_map(|a| self.build_expr(a)).collect();
-                        let result = self.new_temp();
-                        self.emit(Instruction::Call {
-                            result: Some(result.clone()),
-                            func: name.clone(),
-                            args: arg_vals,
-                            is_extern: false,
-                        });
-                        Some(result)
+                        // Check if this is a variable holding a lambda (function pointer)
+                        // For now, we treat variables that were assigned from lambdas as indirect calls
+                        let is_lambda_var = self.variable_types.get(name)
+                            .map(|t| matches!(t, Type::Function { .. }))
+                            .unwrap_or(false);
+
+                        if is_lambda_var {
+                            // Indirect call through function pointer
+                            let func_ptr = self.build_expr(callee)?;
+                            let arg_vals: Vec<Value> = args.iter().filter_map(|a| self.build_expr(a)).collect();
+                            let result = self.new_temp();
+                            self.emit(Instruction::IndirectCall {
+                                result: Some(result.clone()),
+                                func_ptr,
+                                args: arg_vals,
+                            });
+                            Some(result)
+                        } else {
+                            // Regular function call
+                            let arg_vals: Vec<Value> = args.iter().filter_map(|a| self.build_expr(a)).collect();
+                            let result = self.new_temp();
+                            self.emit(Instruction::Call {
+                                result: Some(result.clone()),
+                                func: name.clone(),
+                                args: arg_vals,
+                                is_extern: false,
+                            });
+                            Some(result)
+                        }
                     }
-                    _ => None,
+                    ExprKind::Lambda { .. } => {
+                        // Calling a lambda expression directly - build lambda, then indirect call
+                        if let Some(func_ptr) = callee_val {
+                            let arg_vals: Vec<Value> = args.iter().filter_map(|a| self.build_expr(a)).collect();
+                            let result = self.new_temp();
+                            self.emit(Instruction::IndirectCall {
+                                result: Some(result.clone()),
+                                func_ptr,
+                                args: arg_vals,
+                            });
+                            Some(result)
+                        } else {
+                            None
+                        }
+                    }
+                    _ => {
+                        // Other expressions that evaluate to function pointers
+                        if let Some(func_ptr) = callee_val {
+                            let arg_vals: Vec<Value> = args.iter().filter_map(|a| self.build_expr(a)).collect();
+                            let result = self.new_temp();
+                            self.emit(Instruction::IndirectCall {
+                                result: Some(result.clone()),
+                                func_ptr,
+                                args: arg_vals,
+                            });
+                            Some(result)
+                        } else {
+                            None
+                        }
+                    }
                 }
             }
             ExprKind::MethodCall { object, method, args } => {
@@ -817,10 +880,9 @@ impl IRBuilder {
                 // For now, return null (simplified - needs map runtime)
                 None
             }
-            ExprKind::Lambda { params: _, return_type: _, body: _ } => {
-                // Lambda expression
-                // For now, return null (simplified - needs closure support)
-                None
+            ExprKind::Lambda { params, return_type, body } => {
+                // Lambda expression - create a separate function and return a reference to it
+                self.build_lambda(params, return_type, body)
             }
             ExprKind::If { condition, then_branch, else_branch } => {
                 // If expression
@@ -867,6 +929,149 @@ impl IRBuilder {
                 Some(result)
             }
         }
+    }
+
+    /// Build a lambda expression - creates a separate function and returns a reference to it
+    fn build_lambda(
+        &mut self,
+        params: &[LambdaParam],
+        return_type: &Option<Type>,
+        body: &LambdaBody,
+    ) -> Option<Value> {
+        // Generate a unique name for the lambda function
+        self.lambda_counter += 1;
+        let lambda_name = format!("__lambda_{}", self.lambda_counter);
+
+        // Save current function context
+        let saved_function = self.current_function.take();
+        let saved_temp_counter = self.temp_counter;
+        let saved_label_counter = self.label_counter;
+        let saved_variable_types = self.variable_types.clone();
+        let saved_blocks = self.blocks.clone();
+        let saved_current_block = self.current_block.clone();
+        let saved_loop_stack = self.loop_stack.clone();
+
+        // Reset for new function
+        self.temp_counter = 0;
+        self.label_counter = 0;
+        self.variable_types.clear();
+        self.blocks.clear();
+        self.current_block = None;
+        self.loop_stack.clear();
+
+        // Build lambda function parameters
+        let ir_params: Vec<(String, IRType)> = params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let name = if p.name.is_empty() {
+                    format!("_{}", i)
+                } else {
+                    p.name.clone()
+                };
+                let ty = p.type_annotation
+                    .as_ref()
+                    .map(|t| self.convert_type(t))
+                    .unwrap_or(IRType::I64);
+                (name, ty)
+            })
+            .collect();
+
+        // Determine return type
+        let ir_return_type = return_type
+            .as_ref()
+            .map(|t| self.convert_type(t))
+            .unwrap_or(IRType::I64);
+
+        // Create the lambda function
+        self.current_function = Some(IRFunction {
+            name: lambda_name.clone(),
+            params: ir_params.clone(),
+            return_type: ir_return_type.clone(),
+            instructions: Vec::new(),
+        });
+
+        // Allocate and store parameters
+        for (i, (name, ty)) in ir_params.iter().enumerate() {
+            let param_val = Value(format!("%param_{}", i));
+            let ptr = Value(format!("%{}", name));
+
+            // Record parameter type for later use
+            if let Some(param) = params.get(i) {
+                if let Some(ref type_ann) = param.type_annotation {
+                    self.variable_types.insert(name.clone(), type_ann.clone());
+                }
+            }
+
+            self.emit(Instruction::Alloca {
+                result: ptr.clone(),
+                ty: ty.clone(),
+            });
+            self.emit(Instruction::Store {
+                value: param_val,
+                ptr,
+            });
+        }
+
+        // Build the lambda body
+        match body {
+            LambdaBody::Expr(expr) => {
+                if let Some(val) = self.build_expr(expr) {
+                    self.emit(Instruction::Return(Some(val)));
+                } else {
+                    // Return default value
+                    let default = self.new_temp();
+                    self.emit(Instruction::Const {
+                        result: default.clone(),
+                        value: "0".to_string(),
+                        ty: ir_return_type.clone(),
+                    });
+                    self.emit(Instruction::Return(Some(default)));
+                }
+            }
+            LambdaBody::Block(stmts) => {
+                for stmt in stmts {
+                    self.build_stmt(stmt);
+                }
+                // Add implicit return if needed
+                if let Some(ref func) = self.current_function {
+                    if let Some(last) = func.instructions.last() {
+                        if !matches!(last, Instruction::Return(_)) {
+                            let default = self.new_temp();
+                            self.emit(Instruction::Const {
+                                result: default.clone(),
+                                value: "0".to_string(),
+                                ty: ir_return_type,
+                            });
+                            self.emit(Instruction::Return(Some(default)));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Take the lambda function and add to pending
+        if let Some(lambda_func) = self.current_function.take() {
+            self.pending_lambdas.push(lambda_func);
+        }
+
+        // Restore the original function context
+        self.current_function = saved_function;
+        self.temp_counter = saved_temp_counter;
+        self.label_counter = saved_label_counter;
+        self.variable_types = saved_variable_types;
+        self.blocks = saved_blocks;
+        self.current_block = saved_current_block;
+        self.loop_stack = saved_loop_stack;
+
+        // Create a reference to the lambda function in the current function
+        let result = self.new_temp();
+        self.emit(Instruction::LambdaRef {
+            result: result.clone(),
+            func_name: lambda_name,
+        });
+
+        Some(result)
     }
 
     fn convert_type(&self, ty: &Type) -> IRType {
@@ -1300,6 +1505,18 @@ impl IRBuilder {
             ExprKind::FloatLiteral(_) => Type::Float64,
             ExprKind::BoolLiteral(_) => Type::Bool,
             ExprKind::StringLiteral(_) => Type::String,
+            ExprKind::Lambda { params, return_type, body: _ } => {
+                // Lambda expression has a function type
+                let param_types: Vec<Type> = params
+                    .iter()
+                    .map(|p| p.type_annotation.clone().unwrap_or(Type::Int64))
+                    .collect();
+                let ret_type = return_type.clone().unwrap_or(Type::Int64);
+                Type::Function {
+                    params: param_types,
+                    return_type: Box::new(ret_type),
+                }
+            }
             ExprKind::Binary { op, left, right } => {
                 if *op == AstBinOp::Add {
                     let left_type = self.infer_ast_type(left);
@@ -1366,6 +1583,18 @@ impl IRBuilder {
                 // Prefer then_type, fall back to else_type, then Int64 as default
                 then_type.or(else_type).or(Some(Type::Int64))
             }
+            ExprKind::Lambda { params, return_type, body: _ } => {
+                // Lambda expression has a function type
+                let param_types: Vec<Type> = params
+                    .iter()
+                    .map(|p| p.type_annotation.clone().unwrap_or(Type::Int64))
+                    .collect();
+                let ret_type = return_type.clone().unwrap_or(Type::Int64);
+                Some(Type::Function {
+                    params: param_types,
+                    return_type: Box::new(ret_type),
+                })
+            }
             ExprKind::Call { callee, args: _ } => {
                 // Look up the function return type
                 if let ExprKind::Ident(name) = &callee.kind {
@@ -1375,6 +1604,17 @@ impl IRBuilder {
                             return Some(self.ir_type_to_type(&func.return_type));
                         }
                     }
+                    // Check pending lambdas
+                    for lambda in &self.pending_lambdas {
+                        if lambda.name == *name {
+                            return Some(self.ir_type_to_type(&lambda.return_type));
+                        }
+                    }
+                }
+                // For indirect calls (lambda calls), get the return type from the callee's function type
+                let callee_type = self.get_expr_type_with_vars(callee);
+                if let Some(Type::Function { return_type, .. }) = callee_type {
+                    return Some(*return_type);
                 }
                 None
             }

@@ -940,6 +940,57 @@ impl AOTCodeGenerator {
                 let cranelift_ty = self.convert_ir_type(to_type);
                 self.store_variable(builder, result, cast_val, variables, var_counter, cranelift_ty);
             }
+            Instruction::LambdaRef { result, func_name } => {
+                // Get the function reference for the lambda function
+                let func_ref = self.get_or_create_func_ref(
+                    builder,
+                    func_name,
+                    func_ref_cache,
+                )?;
+
+                // Store the function reference as a pointer
+                // Use func_addr to get the address of the function
+                let func_addr = builder.ins().func_addr(self.pointer_type, func_ref);
+                self.store_variable(builder, result, func_addr, variables, var_counter, self.pointer_type);
+            }
+            Instruction::IndirectCall { result, func_ptr, args } => {
+                // Load the function pointer
+                let ptr_val = self.load_variable(builder, func_ptr, variables)?;
+
+                // Build argument values
+                let arg_vals: Vec<Value> = args
+                    .iter()
+                    .filter_map(|a| self.load_variable(builder, a, variables).ok())
+                    .collect();
+
+                // For indirect calls, we need to create a signature
+                // Since we don't have type info here, assume a simple signature: (args...) -> i64
+                let mut sig = builder.func.signature.clone();
+                for _ in &arg_vals {
+                    sig.params.push(AbiParam::new(types::I64));
+                }
+                // Add return type if there's a result
+                if result.is_some() {
+                    sig.returns.push(AbiParam::new(types::I64));
+                }
+
+                let sig_ref = builder.func.import_signature(sig);
+
+                // Create an indirect function call
+                let call = builder.ins().call_indirect(sig_ref, ptr_val, &arg_vals);
+
+                // Store the result if present
+                if let Some(res) = result {
+                    let return_vals = builder.inst_results(call);
+                    if !return_vals.is_empty() {
+                        self.store_variable(builder, res, return_vals[0], variables, var_counter, types::I64);
+                    } else {
+                        // No return value, store default
+                        let default = builder.ins().iconst(types::I64, 0);
+                        self.store_variable(builder, res, default, variables, var_counter, types::I64);
+                    }
+                }
+            }
         }
         Ok(())
     }

@@ -219,6 +219,21 @@ pub enum Instruction {
 
     /// Continue to next iteration
     Continue,
+
+    /// Lambda function reference: %result = lambda_ref func_name
+    /// Creates a reference to a lambda function that can be called indirectly
+    LambdaRef {
+        result: Value,
+        func_name: String,
+    },
+
+    /// Indirect function call through function pointer: %result = call_indirect func_ptr(args...)
+    /// Used for calling lambda functions
+    IndirectCall {
+        result: Option<Value>,
+        func_ptr: Value,
+        args: Vec<Value>,
+    },
 }
 
 /// Binary operations in IR
@@ -365,6 +380,16 @@ impl fmt::Display for Instruction {
             Instruction::ArrayLen { result, array } => write!(f, "{} = array_len {}", result, array),
             Instruction::Break => write!(f, "break"),
             Instruction::Continue => write!(f, "continue"),
+            Instruction::LambdaRef { result, func_name } => {
+                write!(f, "{} = lambda_ref {}", result, func_name)
+            }
+            Instruction::IndirectCall { result, func_ptr, args } => {
+                if let Some(res) = result {
+                    write!(f, "{} = call_indirect {}({})", res, func_ptr, args.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", "))
+                } else {
+                    write!(f, "call_indirect {}({})", func_ptr, args.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", "))
+                }
+            }
         }
     }
 }
