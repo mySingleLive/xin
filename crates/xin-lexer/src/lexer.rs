@@ -217,11 +217,41 @@ impl Lexer {
                 }
             }
 
-            // String literal
-            '"' => self.string_literal(start_line, start_col),
+            // String literal (double quote)
+            '"' => {
+                if self.peek() == '"' && self.peek_next() == Some('"') {
+                    // Triple double quote - multiline string
+                    self.advance(); // consume second "
+                    self.advance(); // consume third "
+                    self.multiline_string('"', start_line, start_col)
+                } else {
+                    self.string_literal(start_line, start_col)
+                }
+            }
+
+            // Single quote - character literal or multiline string
+            '\'' => {
+                if self.peek() == '\'' && self.peek_next() == Some('\'') {
+                    // Triple single quote - multiline string
+                    self.advance(); // consume second '
+                    self.advance(); // consume third '
+                    self.multiline_string('\'', start_line, start_col)
+                } else {
+                    self.char_literal(start_line, start_col)
+                }
+            }
 
             // Template string literal
-            '`' => self.template_string(start_line, start_col),
+            '`' => {
+                if self.peek() == '`' && self.peek_next() == Some('`') {
+                    // Triple backtick - multiline template string
+                    self.advance(); // consume second `
+                    self.advance(); // consume third `
+                    self.multiline_template_string(start_line, start_col)
+                } else {
+                    self.template_string(start_line, start_col)
+                }
+            }
 
             // Number literals
             '0'..='9' => self.number_literal(start_line, start_col, ch),
@@ -292,6 +322,119 @@ impl Lexer {
 
         self.advance(); // closing `
         Ok(Token::new(TokenKind::TemplateString, value, start_line, start_col))
+    }
+
+    fn multiline_string(
+        &mut self,
+        quote: char,
+        start_line: usize,
+        start_col: usize,
+    ) -> Result<Token, LexerError> {
+        let mut value = String::new();
+
+        while !self.is_at_end() {
+            // Check for closing triple quote
+            if self.peek() == quote && self.peek_next() == Some(quote) && self.peek_next_next() == Some(quote) {
+                self.advance(); // consume first quote
+                self.advance(); // consume second quote
+                self.advance(); // consume third quote
+                return Ok(Token::new(TokenKind::StringLiteral, value, start_line, start_col));
+            }
+
+            let ch = self.advance();
+            if ch == '\\' {
+                // Handle escape sequences
+                if !self.is_at_end() {
+                    let escaped = self.advance();
+                    match escaped {
+                        'n' => value.push('\n'),
+                        't' => value.push('\t'),
+                        'r' => value.push('\r'),
+                        '"' if quote == '"' => value.push('"'),
+                        '\'' if quote == '\'' => value.push('\''),
+                        '\\' => value.push('\\'),
+                        _ => return Err(LexerError::InvalidEscape(escaped)),
+                    }
+                }
+            } else if ch == '\n' {
+                self.line += 1;
+                self.column = 1;
+                value.push(ch);
+            } else {
+                value.push(ch);
+            }
+        }
+
+        Err(LexerError::UnterminatedString)
+    }
+
+    fn multiline_template_string(
+        &mut self,
+        start_line: usize,
+        start_col: usize,
+    ) -> Result<Token, LexerError> {
+        let mut value = String::new();
+
+        while !self.is_at_end() {
+            // Check for closing triple backtick
+            if self.peek() == '`' && self.peek_next() == Some('`') && self.peek_next_next() == Some('`') {
+                self.advance(); // consume first backtick
+                self.advance(); // consume second backtick
+                self.advance(); // consume third backtick
+                return Ok(Token::new(TokenKind::TemplateString, value, start_line, start_col));
+            }
+
+            let ch = self.advance();
+            if ch == '\\' {
+                // Keep escape sequences for parser to handle
+                value.push(ch);
+                if !self.is_at_end() {
+                    value.push(self.advance());
+                }
+            } else if ch == '\n' {
+                self.line += 1;
+                self.column = 1;
+                value.push(ch);
+            } else {
+                value.push(ch);
+            }
+        }
+
+        Err(LexerError::UnterminatedTemplate)
+    }
+
+    fn char_literal(&mut self, start_line: usize, start_col: usize) -> Result<Token, LexerError> {
+        let mut value = String::new();
+
+        while !self.is_at_end() && self.peek() != '\'' {
+            let ch = self.advance();
+            if ch == '\\' {
+                if !self.is_at_end() {
+                    let escaped = self.advance();
+                    match escaped {
+                        'n' => value.push('\n'),
+                        't' => value.push('\t'),
+                        'r' => value.push('\r'),
+                        '\'' => value.push('\''),
+                        '\\' => value.push('\\'),
+                        _ => return Err(LexerError::InvalidEscape(escaped)),
+                    }
+                }
+            } else if ch == '\n' {
+                self.line += 1;
+                self.column = 1;
+                value.push(ch);
+            } else {
+                value.push(ch);
+            }
+        }
+
+        if self.is_at_end() {
+            return Err(LexerError::UnterminatedString);
+        }
+
+        self.advance(); // closing '
+        Ok(Token::new(TokenKind::CharLiteral, value, start_line, start_col))
     }
 
     fn number_literal(&mut self, start_line: usize, start_col: usize, first: char) -> Result<Token, LexerError> {
@@ -380,6 +523,10 @@ impl Lexer {
 
     fn peek_next(&self) -> Option<char> {
         self.source.get(self.pos + 1).copied()
+    }
+
+    fn peek_next_next(&self) -> Option<char> {
+        self.source.get(self.pos + 2).copied()
     }
 
     fn advance(&mut self) -> char {
@@ -474,5 +621,50 @@ mod tests {
         let tokens = lexer.tokenize().unwrap();
         assert_eq!(tokens[0].kind, TokenKind::TemplateString);
         assert_eq!(tokens[0].text, "backtick: \\`");
+    }
+
+    // Multiline string tests
+    #[test]
+    fn test_multiline_string_double_quote() {
+        // Use escaped string to have precise control
+        let input = "\"\"\"line1\nline2\nline3\"\"\"";
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens.len(), 2); // StringLiteral + EOF
+        assert_eq!(tokens[0].kind, TokenKind::StringLiteral);
+        assert_eq!(tokens[0].text, "line1\nline2\nline3");
+    }
+
+    #[test]
+    fn test_multiline_string_single_quote() {
+        // Use r##'...'## style for triple single quotes
+        let input = concat!("'''hello\nworld'''");
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens.len(), 2); // StringLiteral + EOF
+        assert_eq!(tokens[0].kind, TokenKind::StringLiteral);
+        assert_eq!(tokens[0].text, "hello\nworld");
+    }
+
+    #[test]
+    fn test_multiline_template_string() {
+        // Use r##`...`## style for triple backticks
+        let input = r##"```hello
+{name}```"##;
+        let mut lexer = Lexer::new(input);
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens.len(), 2); // TemplateString + EOF
+        assert_eq!(tokens[0].kind, TokenKind::TemplateString);
+        assert_eq!(tokens[0].text, "hello\n{name}");
+    }
+
+    #[test]
+    fn test_single_quote_string() {
+        // Test that single quotes work as char literal
+        let mut lexer = Lexer::new("'a'");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens.len(), 2); // CharLiteral + EOF
+        assert_eq!(tokens[0].kind, TokenKind::CharLiteral);
+        assert_eq!(tokens[0].text, "a");
     }
 }
