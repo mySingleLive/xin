@@ -67,6 +67,12 @@ pub enum SemanticError {
 
     #[error("char() argument must be a single character string, found: '{0}'")]
     InvalidCharLiteral(String),
+
+    #[error("'break' statement not within a loop")]
+    BreakOutsideLoop,
+
+    #[error("'continue' statement not within a loop")]
+    ContinueOutsideLoop,
 }
 
 impl From<SemanticError> for Diagnostic {
@@ -91,6 +97,8 @@ impl From<SemanticError> for Diagnostic {
             SemanticError::ImmutableArrayModification { .. } => DiagnosticCode::S003,
             SemanticError::ArrayElementTypeMismatch { .. } => DiagnosticCode::S002,
             SemanticError::InvalidCharLiteral(_) => DiagnosticCode::S002,
+            SemanticError::BreakOutsideLoop => DiagnosticCode::S002,
+            SemanticError::ContinueOutsideLoop => DiagnosticCode::S002,
         };
         Diagnostic::error(code, err.to_string())
     }

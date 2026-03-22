@@ -930,6 +930,10 @@ impl AOTCodeGenerator {
                 let len = builder.inst_results(call_val)[0];
                 self.store_variable(builder, result, len, variables, var_counter, types::I64);
             }
+            Instruction::Break | Instruction::Continue => {
+                // TODO: Implement break/continue codegen (Task 3.3)
+                // These require loop context tracking to jump to the appropriate label
+            }
         }
         Ok(())
     }

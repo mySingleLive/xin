@@ -285,6 +285,8 @@ impl Parser {
             TokenKind::Return => self.parse_return_stmt(),
             TokenKind::If => self.parse_if_stmt(),
             TokenKind::For => self.parse_for_stmt(),
+            TokenKind::Break => self.parse_break_stmt(),
+            TokenKind::Continue => self.parse_continue_stmt(),
             TokenKind::LBrace => self.parse_block_stmt(),
             _ => self.parse_expr_stmt(),
         }
@@ -365,6 +367,18 @@ impl Parser {
         };
 
         Ok(Stmt::new(StmtKind::Return(value), span))
+    }
+
+    fn parse_break_stmt(&mut self) -> Result<Stmt, ParserError> {
+        let span = self.span_from(self.peek().line, self.peek().column);
+        self.consume(TokenKind::Break, "expected 'break'")?;
+        Ok(Stmt::new(StmtKind::Break, span))
+    }
+
+    fn parse_continue_stmt(&mut self) -> Result<Stmt, ParserError> {
+        let span = self.span_from(self.peek().line, self.peek().column);
+        self.consume(TokenKind::Continue, "expected 'continue'")?;
+        Ok(Stmt::new(StmtKind::Continue, span))
     }
 
     fn parse_if_stmt(&mut self) -> Result<Stmt, ParserError> {

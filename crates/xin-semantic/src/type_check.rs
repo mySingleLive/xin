@@ -10,6 +10,7 @@ pub struct TypeChecker {
     scopes: ScopeStack,
     diagnostics: Vec<Diagnostic>,
     current_function_return_type: Option<Type>,
+    loop_depth: usize,
 }
 
 impl TypeChecker {
@@ -18,6 +19,7 @@ impl TypeChecker {
             scopes: ScopeStack::new(),
             diagnostics: Vec::new(),
             current_function_return_type: None,
+            loop_depth: 0,
         }
     }
 
@@ -311,6 +313,7 @@ impl TypeChecker {
             }
             StmtKind::For(for_loop) => {
                 self.scopes.enter_scope();
+                self.loop_depth += 1;
                 match for_loop {
                     ForLoop::CStyle { init, condition, update, body } => {
                         if let Some(init) = init {
@@ -376,9 +379,19 @@ impl TypeChecker {
                         }
                     }
                 }
+                self.loop_depth -= 1;
                 self.scopes.exit_scope();
             }
-            StmtKind::Break | StmtKind::Continue => {}
+            StmtKind::Break => {
+                if self.loop_depth == 0 {
+                    return Err(SemanticError::BreakOutsideLoop);
+                }
+            }
+            StmtKind::Continue => {
+                if self.loop_depth == 0 {
+                    return Err(SemanticError::ContinueOutsideLoop);
+                }
+            }
             StmtKind::Block(stmts) => {
                 self.scopes.enter_scope();
                 for stmt in stmts {
@@ -1204,5 +1217,70 @@ impl TypeChecker {
 impl Default for TypeChecker {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use xin_lexer::Lexer;
+    use xin_parser::Parser;
+
+    fn check_program(source: &str) -> Result<(), Vec<Diagnostic>> {
+        let mut lexer = Lexer::new(source);
+        let mut parser = Parser::new(&mut lexer).expect("Parser should be created");
+        let ast = parser.parse().expect("Parser should parse");
+        let mut checker = TypeChecker::new();
+        checker.check(&ast)
+    }
+
+    #[test]
+    fn test_break_outside_loop_error() {
+        let result = check_program("break");
+        assert!(result.is_err(), "break outside loop should be an error");
+    }
+
+    #[test]
+    fn test_continue_outside_loop_error() {
+        let result = check_program("continue");
+        assert!(result.is_err(), "continue outside loop should be an error");
+    }
+
+    #[test]
+    fn test_break_inside_loop_ok() {
+        let result = check_program(
+            r#"
+            for (var i = 0; i < 10; i = i + 1) {
+                if (i == 5) { break }
+            }
+        "#,
+        );
+        assert!(result.is_ok(), "break inside loop should be valid");
+    }
+
+    #[test]
+    fn test_continue_inside_loop_ok() {
+        let result = check_program(
+            r#"
+            for (var i = 0; i < 10; i = i + 1) {
+                if (i == 5) { continue }
+            }
+        "#,
+        );
+        assert!(result.is_ok(), "continue inside loop should be valid");
+    }
+
+    #[test]
+    fn test_break_in_nested_loop_ok() {
+        let result = check_program(
+            r#"
+            for (var i = 0; i < 10; i = i + 1) {
+                for (var j = 0; j < 10; j = j + 1) {
+                    break
+                }
+            }
+        "#,
+        );
+        assert!(result.is_ok(), "break inside nested loop should be valid");
     }
 }

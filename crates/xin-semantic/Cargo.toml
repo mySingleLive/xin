@@ -7,3 +7,7 @@ edition = "2021"
 xin-ast = { path = "../xin-ast" }
 xin-diagnostics = { path = "../xin-diagnostics" }
 thiserror = "1.0"
+
+[dev-dependencies]
+xin-lexer = { path = "../xin-lexer" }
+xin-parser = { path = "../xin-parser" }
