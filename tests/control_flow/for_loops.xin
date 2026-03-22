@@ -1,29 +1,53 @@
-// Test for loops
-// NOTE: This test requires control flow code generation to be implemented
+// Test for loops - C-style and while-style
 
 func main() {
-    // C-style for loop
-    for (var i = 0; i < 5; i = i + 1) {
-        println(i)
+    // Test 1: C-style for loop - basic counting
+    var sum1 = 0
+    for (var i = 1; i <= 5; i = i + 1) {
+        sum1 = sum1 + i
     }
-    println("count: 5")
+    println(sum1)  // Expected: 15 (1+2+3+4+5)
 
-    // While-style for loop
-    var j = 5
-    for (j > 0) {
-        println(j)
-        j = j - 1
+    // Test 2: C-style for loop - with condition
+    var count = 0
+    for (var i = 0; i < 3; i = i + 1) {
+        count = count + 1
     }
+    println(count)  // Expected: 3
+
+    // Test 3: While-style for loop
+    var n = 5
+    var sum2 = 0
+    for (n > 0) {
+        sum2 = sum2 + n
+        n = n - 1
+    }
+    println(sum2)  // Expected: 15 (5+4+3+2+1)
+
+    // Test 4: Nested for loops
+    var total = 0
+    for (var i = 0; i < 3; i = i + 1) {
+        for (var j = 0; j < 3; j = j + 1) {
+            total = total + 1
+        }
+    }
+    println(total)  // Expected: 9
+
+    // Test 5: For loop with early termination condition
+    var found = 0
+    for (var i = 0; i < 100; i = i + 1) {
+        if (i == 5) {
+            found = i
+        }
+    }
+    println(found)  // Expected: 5
+
+    // Test 6: For loop counting down
+    var countdown = 0
+    for (var i = 5; i > 0; i = i - 1) {
+        countdown = countdown + 1
+    }
+    println(countdown)  // Expected: 5
+
     println("done")
-
-    // Infinite loop with break (requires break implementation)
-    // var k = 0
-    // for {
-    //     k = k + 1
-    //     if (k > 3) {
-    //         break
-    //     }
-    //     println(k)
-    // }
-    // println("infinite done")
 }
