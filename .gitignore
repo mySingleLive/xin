@@ -17,3 +17,6 @@ Thumbs.db
 *.out
 *.o
 *.a
+
+# Worktrees
+.worktrees/
