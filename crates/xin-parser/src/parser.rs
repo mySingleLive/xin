@@ -967,6 +967,12 @@ impl Parser {
                 self.advance();
                 Ok(Expr::new(ExprKind::StringLiteral(value), span))
             }
+            // Single-quoted string literal (treated as String for char() function)
+            TokenKind::CharLiteral => {
+                let value = token.text.clone();
+                self.advance();
+                Ok(Expr::new(ExprKind::StringLiteral(value), span))
+            }
             TokenKind::TemplateString => {
                 let text = self.advance().text.clone();
                 self.parse_template_literal(&text, span)
@@ -1002,6 +1008,12 @@ impl Parser {
                     ));
                 }
                 Ok(Expr::new(ExprKind::Ident(name), span))
+            }
+            // Handle 'char' keyword as function call (char() builtin function)
+            TokenKind::Char => {
+                self.advance();
+                // Treat 'char' as identifier for function call
+                Ok(Expr::new(ExprKind::Ident("char".to_string()), span))
             }
             TokenKind::LParen => {
                 self.advance();

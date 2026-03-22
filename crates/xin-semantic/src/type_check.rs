@@ -78,6 +78,17 @@ impl TypeChecker {
             scope_level: 0,
         };
         self.scopes.define("printf", printf_symbol);
+
+        // char: accepts string and returns char
+        let char_symbol = Symbol {
+            name: "char".to_string(),
+            kind: SymbolKind::Function {
+                params: vec![("s".to_string(), Type::String, false)],
+                return_type: Type::Char,
+            },
+            scope_level: 0,
+        };
+        self.scopes.define("char", char_symbol);
     }
 
     fn collect_declaration(&mut self, decl: &Decl) {
@@ -555,6 +566,33 @@ impl TypeChecker {
                             }
                             return Ok(Type::Void);
                         }
+                    }
+
+                    // Handle char() with compile-time string length check
+                    if name == "char" {
+                        if args.len() != 1 {
+                            return Err(SemanticError::WrongNumberOfArguments {
+                                expected: 1,
+                                found: args.len(),
+                            });
+                        }
+                        // Check if argument is a string literal for compile-time validation
+                        if let ExprKind::StringLiteral(s) = &args[0].kind {
+                            // Compile-time check: string must have exactly 1 character
+                            if s.chars().count() != 1 {
+                                return Err(SemanticError::InvalidCharLiteral(s.clone()));
+                            }
+                        }
+                        // For non-literal strings, just check it's a string type
+                        // (runtime behavior is undefined if string length != 1)
+                        let arg_type = self.check_expr(&args[0])?;
+                        if arg_type != Type::String {
+                            return Err(SemanticError::TypeMismatch {
+                                expected: Type::String,
+                                found: arg_type,
+                            });
+                        }
+                        return Ok(Type::Char);
                     }
 
                     // Clone the function info if found
