@@ -205,6 +205,12 @@ pub enum Instruction {
         result: Value,
         array: Value,
     },
+
+    /// Break out of loop
+    Break,
+
+    /// Continue to next iteration
+    Continue,
 }
 
 /// Binary operations in IR
@@ -223,6 +229,130 @@ pub enum BinOp {
     Ge,
     And,
     Or,
+}
+
+impl fmt::Display for Instruction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Instruction::Alloca { result, ty } => write!(f, "{} = alloca {}", result, ty),
+            Instruction::Store { value, ptr } => write!(f, "store {}, {}", value, ptr),
+            Instruction::Load { result, ptr } => write!(f, "{} = load {}", result, ptr),
+            Instruction::Const { result, value, ty } => write!(f, "{} = const {} {}", result, value, ty),
+            Instruction::StringConst { result, string_index } => {
+                write!(f, "{} = string_const {}", result, string_index)
+            }
+            Instruction::Binary {
+                result,
+                op,
+                left,
+                right,
+            } => {
+                let op_str = match op {
+                    BinOp::Add => "add",
+                    BinOp::Sub => "sub",
+                    BinOp::Mul => "mul",
+                    BinOp::Div => "div",
+                    BinOp::Mod => "mod",
+                    BinOp::Eq => "eq",
+                    BinOp::Ne => "ne",
+                    BinOp::Lt => "lt",
+                    BinOp::Gt => "gt",
+                    BinOp::Le => "le",
+                    BinOp::Ge => "ge",
+                    BinOp::And => "and",
+                    BinOp::Or => "or",
+                };
+                write!(f, "{} = {} {}, {}", result, op_str, left, right)
+            }
+            Instruction::Call {
+                result,
+                func,
+                args,
+                is_extern,
+            } => {
+                if let Some(res) = result {
+                    write!(f, "{} = call {}({})", res, func, args.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", "))?;
+                } else {
+                    write!(f, "call {}({})", func, args.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", "))?;
+                }
+                if *is_extern {
+                    write!(f, " [extern]")?;
+                }
+                Ok(())
+            }
+            Instruction::Return(val) => {
+                if let Some(v) = val {
+                    write!(f, "ret {}", v)
+                } else {
+                    write!(f, "ret")
+                }
+            }
+            Instruction::Jump(label) => write!(f, "br {}", label),
+            Instruction::Branch {
+                cond,
+                then_label,
+                else_label,
+            } => write!(f, "br {}, {}, {}", cond, then_label, else_label),
+            Instruction::Label(label) => write!(f, "{}:", label),
+            Instruction::Phi { result, incoming } => {
+                write!(
+                    f,
+                    "{} = phi {}",
+                    result,
+                    incoming
+                        .iter()
+                        .map(|(v, l)| format!("[{}, {}]", v, l))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            Instruction::StringConcat {
+                result,
+                left,
+                left_type,
+                right,
+                right_type,
+            } => {
+                let left_ty = match left_type {
+                    ConcatType::String => "string",
+                    ConcatType::Int => "int",
+                    ConcatType::Float => "float",
+                    ConcatType::Bool => "bool",
+                };
+                let right_ty = match right_type {
+                    ConcatType::String => "string",
+                    ConcatType::Int => "int",
+                    ConcatType::Float => "float",
+                    ConcatType::Bool => "bool",
+                };
+                write!(f, "{} = concat {}:{}, {}:{}", result, left, left_ty, right, right_ty)
+            }
+            Instruction::ToString {
+                result,
+                value,
+                from_type,
+            } => write!(f, "{} = to_string {} [{}]", result, value, from_type),
+            Instruction::StringFree { value } => write!(f, "free {}", value),
+            Instruction::ArrayNew { result, capacity } => {
+                write!(f, "{} = array_new {}", result, capacity)
+            }
+            Instruction::ArrayGet {
+                result,
+                array,
+                index,
+            } => write!(f, "{} = array_get {}, {}", result, array, index),
+            Instruction::ArraySet {
+                array,
+                index,
+                value,
+            } => write!(f, "array_set {}, {}, {}", array, index, value),
+            Instruction::ArrayPush { array, value } => write!(f, "array_push {}, {}", array, value),
+            Instruction::ArrayPop { result, array } => write!(f, "{} = array_pop {}", result, array),
+            Instruction::ArrayLen { result, array } => write!(f, "{} = array_len {}", result, array),
+            Instruction::Break => write!(f, "break"),
+            Instruction::Continue => write!(f, "continue"),
+        }
+    }
 }
 
 /// IR Function
@@ -275,5 +405,21 @@ impl IRModule {
 impl Default for IRModule {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_break_continue_instructions() {
+        // 测试 Break 指令存在
+        let brk = Instruction::Break;
+        assert!(matches!(brk, Instruction::Break));
+
+        // 测试 Continue 指令存在
+        let cnt = Instruction::Continue;
+        assert!(matches!(cnt, Instruction::Continue));
     }
 }
