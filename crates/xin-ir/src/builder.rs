@@ -1,5 +1,7 @@
 //! IR Builder
 
+use std::collections::{HashMap, HashSet};
+
 use xin_ast::{BinOp as AstBinOp, Decl, DeclKind, Expr, ExprKind, FuncDecl, SourceFile, Stmt, StmtKind, TemplatePart, Type};
 
 use crate::{BinOp, ConcatType, ExternFunction, Instruction, IRFunction, IRModule, IRType, Value};
@@ -11,7 +13,11 @@ pub struct IRBuilder {
     temp_counter: usize,
     label_counter: usize,
     /// Variable types in current scope
-    variable_types: std::collections::HashMap<String, Type>,
+    variable_types: HashMap<String, Type>,
+    /// Created blocks (labels)
+    blocks: HashSet<String>,
+    /// Current block label
+    current_block: Option<String>,
 }
 
 impl IRBuilder {
@@ -21,7 +27,9 @@ impl IRBuilder {
             current_function: None,
             temp_counter: 0,
             label_counter: 0,
-            variable_types: std::collections::HashMap::new(),
+            variable_types: HashMap::new(),
+            blocks: HashSet::new(),
+            current_block: None,
         }
     }
 
@@ -687,6 +695,51 @@ impl IRBuilder {
         false
     }
 
+    // === Block management methods ===
+
+    /// Create a new basic block with the given label
+    pub fn create_block(&mut self, label: &str) {
+        self.blocks.insert(label.to_string());
+    }
+
+    /// Switch to the specified block (emit label if needed)
+    pub fn switch_to_block(&mut self, label: &str) {
+        self.current_block = Some(label.to_string());
+        // Emit the label instruction
+        self.emit(Instruction::Label(label.to_string()));
+    }
+
+    /// Emit an unconditional jump instruction
+    pub fn emit_jump(&mut self, target: &str) {
+        self.emit(Instruction::Jump(target.to_string()));
+    }
+
+    /// Emit a conditional branch instruction
+    pub fn emit_branch(&mut self, cond: Value, then_label: &str, else_label: &str) {
+        self.emit(Instruction::Branch {
+            cond,
+            then_label: then_label.to_string(),
+            else_label: else_label.to_string(),
+        });
+    }
+
+    /// Emit a constant instruction
+    pub fn emit_const(&mut self, result: Value, value: &str, ty: IRType) {
+        self.emit(Instruction::Const {
+            result,
+            value: value.to_string(),
+            ty,
+        });
+    }
+
+    /// Get the current instruction list (for testing)
+    pub fn instructions(&self) -> &[Instruction] {
+        self.current_function
+            .as_ref()
+            .map(|f| f.instructions.as_slice())
+            .unwrap_or(&[])
+    }
+
     /// Handle println(expr) - prints value followed by newline
     fn handle_println(&mut self, args: &[Expr]) -> Option<Value> {
         if args.is_empty() {
@@ -1234,5 +1287,44 @@ impl IRBuilder {
 impl Default for IRBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ir_jump_and_branch() {
+        let mut builder = IRBuilder::new();
+
+        // Start a function manually for testing
+        builder.current_function = Some(IRFunction {
+            name: "test".to_string(),
+            params: vec![],
+            return_type: IRType::Void,
+            instructions: Vec::new(),
+        });
+
+        builder.create_block("entry");
+        builder.create_block("then");
+        builder.create_block("else");
+        builder.create_block("merge");
+
+        builder.switch_to_block("entry");
+        let cond = builder.new_temp();
+        builder.emit_const(cond.clone(), "1", IRType::Bool);
+        builder.emit_branch(cond, "then", "else");
+
+        builder.switch_to_block("then");
+        builder.emit_jump("merge");
+
+        builder.switch_to_block("else");
+        builder.emit_jump("merge");
+
+        // Verify instruction sequence
+        let instrs = builder.instructions();
+        assert!(instrs.iter().any(|i| matches!(i, Instruction::Jump(_))));
+        assert!(instrs.iter().any(|i| matches!(i, Instruction::Branch { .. })));
     }
 }
