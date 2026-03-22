@@ -679,7 +679,193 @@ impl IRBuilder {
 
                 Some(result)
             }
-            _ => None,
+            ExprKind::SafeAccess { object, field: _ } => {
+                // Safe navigation: obj?.field
+                // If object is null, return null; otherwise return field value (as nullable)
+                let obj_val = self.build_expr(object)?;
+
+                // Create labels for null check
+                let not_null_label = self.new_label();
+                let is_null_label = self.new_label();
+                let end_label = self.new_label();
+
+                // Null check: compare with 0 (null pointer)
+                let null_val = self.new_temp();
+                self.emit(Instruction::Const {
+                    result: null_val.clone(),
+                    value: "0".to_string(),
+                    ty: IRType::I64,
+                });
+
+                let is_not_null = self.new_temp();
+                self.emit(Instruction::Binary {
+                    result: is_not_null.clone(),
+                    op: BinOp::Ne,
+                    left: obj_val.clone(),
+                    right: null_val,
+                });
+
+                self.emit(Instruction::Branch {
+                    cond: is_not_null,
+                    then_label: not_null_label.clone(),
+                    else_label: is_null_label.clone(),
+                });
+
+                // Not null path: access field
+                self.emit(Instruction::Label(not_null_label.clone()));
+                // For now, return the object value as field access (simplified)
+                // In a full implementation, this would access the struct field
+                let field_val = obj_val.clone();
+                self.emit(Instruction::Jump(end_label.clone()));
+
+                // Is null path: return null (0)
+                self.emit(Instruction::Label(is_null_label.clone()));
+                let null_result = self.new_temp();
+                self.emit(Instruction::Const {
+                    result: null_result.clone(),
+                    value: "0".to_string(),
+                    ty: IRType::I64,
+                });
+                self.emit(Instruction::Jump(end_label.clone()));
+
+                // End: use phi to select result
+                self.emit(Instruction::Label(end_label));
+                let result = self.new_temp();
+                self.emit(Instruction::Phi {
+                    result: result.clone(),
+                    incoming: vec![
+                        (field_val, not_null_label),
+                        (null_result, is_null_label),
+                    ],
+                });
+
+                Some(result)
+            }
+            ExprKind::Elvis { left, right } => {
+                // Elvis operator: left ?? right
+                // If left is not null, use left (unwrapped); otherwise use right
+                let left_val = self.build_expr(left)?;
+                let right_val = self.build_expr(right)?;
+
+                // Create labels for null check
+                let not_null_label = self.new_label();
+                let is_null_label = self.new_label();
+                let end_label = self.new_label();
+
+                // Null check: compare with 0 (null pointer)
+                let null_val = self.new_temp();
+                self.emit(Instruction::Const {
+                    result: null_val.clone(),
+                    value: "0".to_string(),
+                    ty: IRType::I64,
+                });
+
+                let is_not_null = self.new_temp();
+                self.emit(Instruction::Binary {
+                    result: is_not_null.clone(),
+                    op: BinOp::Ne,
+                    left: left_val.clone(),
+                    right: null_val,
+                });
+
+                self.emit(Instruction::Branch {
+                    cond: is_not_null,
+                    then_label: not_null_label.clone(),
+                    else_label: is_null_label.clone(),
+                });
+
+                // Not null path: use left value
+                self.emit(Instruction::Label(not_null_label.clone()));
+                let left_result = left_val.clone();
+                self.emit(Instruction::Jump(end_label.clone()));
+
+                // Is null path: use right value
+                self.emit(Instruction::Label(is_null_label.clone()));
+                let right_result = right_val;
+                self.emit(Instruction::Jump(end_label.clone()));
+
+                // End: use phi to select result
+                self.emit(Instruction::Label(end_label));
+                let result = self.new_temp();
+                self.emit(Instruction::Phi {
+                    result: result.clone(),
+                    incoming: vec![
+                        (left_result, not_null_label),
+                        (right_result, is_null_label),
+                    ],
+                });
+
+                Some(result)
+            }
+            ExprKind::ForceUnwrap(inner) => {
+                // Force unwrap: x!!
+                // Assume the value is not null (unsafe)
+                self.build_expr(inner)
+            }
+            ExprKind::FieldAccess { object, field: _ } => {
+                // Field access: obj.field
+                // For now, return the object value (simplified)
+                self.build_expr(object)
+            }
+            ExprKind::StructInstance { name: _, fields: _, mutable: _ } => {
+                // Struct instantiation
+                // For now, return null (simplified - needs proper struct allocation)
+                None
+            }
+            ExprKind::MapLiteral(_) => {
+                // Map literal
+                // For now, return null (simplified - needs map runtime)
+                None
+            }
+            ExprKind::Lambda { params: _, return_type: _, body: _ } => {
+                // Lambda expression
+                // For now, return null (simplified - needs closure support)
+                None
+            }
+            ExprKind::If { condition, then_branch, else_branch } => {
+                // If expression
+                let cond = self.build_expr(condition)?;
+                let result = self.new_temp();
+
+                let then_label = self.new_label();
+                let else_label = self.new_label();
+                let end_label = self.new_label();
+
+                self.emit(Instruction::Branch {
+                    cond,
+                    then_label: then_label.clone(),
+                    else_label: else_label.clone(),
+                });
+
+                self.emit(Instruction::Label(then_label.clone()));
+                let then_val = self.build_expr(then_branch)?;
+                self.emit(Instruction::Jump(end_label.clone()));
+
+                self.emit(Instruction::Label(else_label.clone()));
+                let else_val = if let Some(else_expr) = else_branch {
+                    self.build_expr(else_expr)?
+                } else {
+                    let default = self.new_temp();
+                    self.emit(Instruction::Const {
+                        result: default.clone(),
+                        value: "0".to_string(),
+                        ty: IRType::I64,
+                    });
+                    default
+                };
+                self.emit(Instruction::Jump(end_label.clone()));
+
+                self.emit(Instruction::Label(end_label));
+                self.emit(Instruction::Phi {
+                    result: result.clone(),
+                    incoming: vec![
+                        (then_val, then_label),
+                        (else_val, else_label),
+                    ],
+                });
+
+                Some(result)
+            }
         }
     }
 
