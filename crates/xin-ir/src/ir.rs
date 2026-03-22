@@ -214,6 +214,59 @@ pub enum Instruction {
         array: Value,
     },
 
+    // ========== Map Instructions ==========
+
+    /// Create map: %result = map_new
+    MapNew {
+        result: Value,
+    },
+
+    /// Set key-value: map_set map, key, value
+    MapSet {
+        map: Value,
+        key: Value,
+        value: Value,
+    },
+
+    /// Get value: %result = map_get map, key
+    MapGet {
+        result: Value,
+        map: Value,
+        key: Value,
+    },
+
+    /// Get size: %result = map_len map
+    MapLen {
+        result: Value,
+        map: Value,
+    },
+
+    /// Check key exists: %result = map_has map, key
+    MapHas {
+        result: Value,
+        map: Value,
+        key: Value,
+    },
+
+    /// Remove key-value: %result = map_remove map, key
+    MapRemove {
+        result: Value,
+        map: Value,
+        key: Value,
+    },
+
+    /// Get all keys: %result = map_keys map
+    MapKeys {
+        result: Value,
+        map: Value,
+    },
+
+    /// Get all values: %result = map_values map
+    MapValues {
+        result: Value,
+        map: Value,
+    },
+
     /// Break out of loop
     Break,
 
@@ -378,6 +431,17 @@ impl fmt::Display for Instruction {
             Instruction::ArrayPush { array, value } => write!(f, "array_push {}, {}", array, value),
             Instruction::ArrayPop { result, array } => write!(f, "{} = array_pop {}", result, array),
             Instruction::ArrayLen { result, array } => write!(f, "{} = array_len {}", result, array),
+
+            // Map instructions
+            Instruction::MapNew { result } => write!(f, "{} = map_new", result),
+            Instruction::MapSet { map, key, value } => write!(f, "map_set {}, {}, {}", map, key, value),
+            Instruction::MapGet { result, map, key } => write!(f, "{} = map_get {}, {}", result, map, key),
+            Instruction::MapLen { result, map } => write!(f, "{} = map_len {}", result, map),
+            Instruction::MapHas { result, map, key } => write!(f, "{} = map_has {}, {}", result, map, key),
+            Instruction::MapRemove { result, map, key } => write!(f, "{} = map_remove {}, {}", result, map, key),
+            Instruction::MapKeys { result, map } => write!(f, "{} = map_keys {}", result, map),
+            Instruction::MapValues { result, map } => write!(f, "{} = map_values {}", result, map),
+
             Instruction::Break => write!(f, "break"),
             Instruction::Continue => write!(f, "continue"),
             Instruction::LambdaRef { result, func_name } => {

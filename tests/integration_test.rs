@@ -497,3 +497,182 @@ fn test_ir_lambda_stored_and_called() {
         assert!(has_indirect_call, "Main should have IndirectCall for calling stored lambda");
     }
 }
+
+// ==================== Map Tests ====================
+
+#[test]
+fn test_ir_map_literal() {
+    use xin_lexer::Lexer;
+    use xin_parser::Parser;
+    use xin_semantic::TypeChecker;
+    use xin_ir::IRBuilder;
+
+    let source = r#"
+        func main() {
+            let m = { "a": 1, "b": 2 }
+        }
+    "#;
+    let mut lexer = Lexer::new(source);
+    let mut parser = Parser::new(&mut lexer).unwrap();
+    let ast = parser.parse().unwrap();
+
+    let mut type_checker = TypeChecker::new();
+    type_checker.check(&ast).unwrap();
+
+    let mut ir_builder = IRBuilder::new();
+    let ir_module = ir_builder.build(&ast);
+
+    // Check that main function contains MapNew instruction
+    let main_func = ir_module.functions.iter().find(|f| f.name == "main");
+    assert!(main_func.is_some(), "Should have main function");
+
+    if let Some(func) = main_func {
+        let has_map_new = func.instructions.iter().any(|instr| {
+            matches!(instr, xin_ir::Instruction::MapNew { .. })
+        });
+        assert!(has_map_new, "Should have MapNew instruction for map literal");
+
+        let has_map_set = func.instructions.iter().any(|instr| {
+            matches!(instr, xin_ir::Instruction::MapSet { .. })
+        });
+        assert!(has_map_set, "Should have MapSet instructions for map entries");
+    }
+}
+
+#[test]
+fn test_ir_map_methods() {
+    use xin_lexer::Lexer;
+    use xin_parser::Parser;
+    use xin_semantic::TypeChecker;
+    use xin_ir::IRBuilder;
+
+    let source = r#"
+        func main() {
+            let m = { "name": "Alice", "age": 30 }
+            let size = m.map_len()
+            let has_name = m.has("name")
+            let removed = m.remove("age")
+            let keys = m.keys()
+            let values = m.values()
+        }
+    "#;
+    let mut lexer = Lexer::new(source);
+    let mut parser = Parser::new(&mut lexer).unwrap();
+    let ast = parser.parse().unwrap();
+
+    let mut type_checker = TypeChecker::new();
+    type_checker.check(&ast).unwrap();
+
+    let mut ir_builder = IRBuilder::new();
+    let ir_module = ir_builder.build(&ast);
+
+    let main_func = ir_module.functions.iter().find(|f| f.name == "main");
+    assert!(main_func.is_some(), "Should have main function");
+
+    if let Some(func) = main_func {
+        // Check for MapLen instruction
+        let has_map_len = func.instructions.iter().any(|instr| {
+            matches!(instr, xin_ir::Instruction::MapLen { .. })
+        });
+        assert!(has_map_len, "Should have MapLen instruction");
+
+        // Check for MapHas instruction
+        let has_map_has = func.instructions.iter().any(|instr| {
+            matches!(instr, xin_ir::Instruction::MapHas { .. })
+        });
+        assert!(has_map_has, "Should have MapHas instruction");
+
+        // Check for MapRemove instruction
+        let has_map_remove = func.instructions.iter().any(|instr| {
+            matches!(instr, xin_ir::Instruction::MapRemove { .. })
+        });
+        assert!(has_map_remove, "Should have MapRemove instruction");
+
+        // Check for MapKeys instruction
+        let has_map_keys = func.instructions.iter().any(|instr| {
+            matches!(instr, xin_ir::Instruction::MapKeys { .. })
+        });
+        assert!(has_map_keys, "Should have MapKeys instruction");
+
+        // Check for MapValues instruction
+        let has_map_values = func.instructions.iter().any(|instr| {
+            matches!(instr, xin_ir::Instruction::MapValues { .. })
+        });
+        assert!(has_map_values, "Should have MapValues instruction");
+    }
+}
+
+#[test]
+fn test_ir_map_get_set() {
+    use xin_lexer::Lexer;
+    use xin_parser::Parser;
+    use xin_semantic::TypeChecker;
+    use xin_ir::IRBuilder;
+
+    let source = r#"
+        func main() {
+            let m = { "a": 1 }
+            let val = m["a"]
+        }
+    "#;
+    let mut lexer = Lexer::new(source);
+    let mut parser = Parser::new(&mut lexer).unwrap();
+    let ast = parser.parse().unwrap();
+
+    let mut type_checker = TypeChecker::new();
+    type_checker.check(&ast).unwrap();
+
+    let mut ir_builder = IRBuilder::new();
+    let ir_module = ir_builder.build(&ast);
+
+    let main_func = ir_module.functions.iter().find(|f| f.name == "main");
+    assert!(main_func.is_some(), "Should have main function");
+
+    if let Some(func) = main_func {
+        // Check for MapGet instruction (used for map index access)
+        let has_map_get = func.instructions.iter().any(|instr| {
+            matches!(instr, xin_ir::Instruction::MapGet { .. })
+        });
+        assert!(has_map_get, "Should have MapGet instruction for map index access");
+    }
+}
+
+#[test]
+fn test_ir_empty_map() {
+    use xin_lexer::Lexer;
+    use xin_parser::Parser;
+    use xin_semantic::TypeChecker;
+    use xin_ir::IRBuilder;
+
+    let source = r#"
+        func main() {
+            let m = {}
+        }
+    "#;
+    let mut lexer = Lexer::new(source);
+    let mut parser = Parser::new(&mut lexer).unwrap();
+    let ast = parser.parse().unwrap();
+
+    let mut type_checker = TypeChecker::new();
+    type_checker.check(&ast).unwrap();
+
+    let mut ir_builder = IRBuilder::new();
+    let ir_module = ir_builder.build(&ast);
+
+    let main_func = ir_module.functions.iter().find(|f| f.name == "main");
+    assert!(main_func.is_some(), "Should have main function");
+
+    if let Some(func) = main_func {
+        // Empty map should still create a MapNew
+        let has_map_new = func.instructions.iter().any(|instr| {
+            matches!(instr, xin_ir::Instruction::MapNew { .. })
+        });
+        assert!(has_map_new, "Empty map should still create MapNew instruction");
+
+        // But should have no MapSet instructions
+        let has_map_set = func.instructions.iter().any(|instr| {
+            matches!(instr, xin_ir::Instruction::MapSet { .. })
+        });
+        assert!(!has_map_set, "Empty map should have no MapSet instructions");
+    }
+}

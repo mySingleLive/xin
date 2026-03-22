@@ -57,6 +57,9 @@ pub enum SemanticError {
     #[error("cannot modify immutable array with method '{method}'")]
     ImmutableArrayModification { method: String, span: SourceSpan },
 
+    #[error("cannot modify immutable map with method '{method}'")]
+    ImmutableMapModification { method: String, span: SourceSpan },
+
     #[error("array element type mismatch at index {index}: expected '{expected}', found '{actual}'")]
     ArrayElementTypeMismatch {
         expected: Type,
@@ -95,6 +98,7 @@ impl From<SemanticError> for Diagnostic {
             SemanticError::CannotConvertToString { .. } => DiagnosticCode::S002,
             SemanticError::NotIndexable { .. } => DiagnosticCode::S002,
             SemanticError::ImmutableArrayModification { .. } => DiagnosticCode::S003,
+            SemanticError::ImmutableMapModification { .. } => DiagnosticCode::S003,
             SemanticError::ArrayElementTypeMismatch { .. } => DiagnosticCode::S002,
             SemanticError::InvalidCharLiteral(_) => DiagnosticCode::S002,
             SemanticError::BreakOutsideLoop => DiagnosticCode::S002,

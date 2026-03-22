@@ -9,6 +9,15 @@ use xin_lexer::Lexer;
 
 use crate::ParserError;
 
+/// Result of parsing function call arguments
+/// Contains both regular args and optional trailing lambda
+struct CallArgs {
+    args: Vec<Expr>,
+    trailing_lambda: Option<Expr>,
+    /// Whether the trailing lambda body has consumed the closing RParen
+    rparen_consumed: bool,
+}
+
 /// Parser state
 pub struct Parser {
     tokens: Vec<Token>,
@@ -335,7 +344,8 @@ impl Parser {
             let has_mut = self.match_kind(TokenKind::Mut);
             (Some(self.parse_type()?), has_mut)
         } else {
-            (None, false)
+            // If variable is declared with 'var', make the object mutable by default
+            (None, mutable)
         };
 
         let value = if self.match_kind(TokenKind::Eq) {
@@ -896,31 +906,88 @@ impl Parser {
                     span,
                 );
             } else if self.match_kind(TokenKind::Dot) {
-                // Field access or method call
-                let name = self.consume_ident("expected field or method name")?;
+                // Field access, method call, or map access with string key
+                // Support:
+                //   m.field       - identifier field access
+                //   m."key"       - string literal key (equivalent to m["key"])
+                //   m.'key'       - char literal key (equivalent to m['key'])
+                //   m.`template`  - template string key (equivalent to m[`template`])
 
-                if self.match_kind(TokenKind::LParen) {
-                    // Method call
-                    let args = self.parse_args()?;
-                    self.consume(TokenKind::RParen, "expected ')'")?;
-                    let span = expr.span.clone();
-                    expr = Expr::new(
-                        ExprKind::MethodCall {
-                            object: Box::new(expr),
-                            method: name,
-                            args,
-                        },
-                        span,
-                    );
-                } else {
-                    let span = expr.span.clone();
-                    expr = Expr::new(
-                        ExprKind::FieldAccess {
-                            object: Box::new(expr),
-                            field: name,
-                        },
-                        span,
-                    );
+                let next_token = self.peek().clone();
+                match next_token.kind {
+                    TokenKind::StringLiteral => {
+                        // Map access with string key: m."name"
+                        self.advance();
+                        let key_text = next_token.text.clone();
+                        let key_span = self.span_from(next_token.line, next_token.column);
+                        let key = Expr::new(ExprKind::StringLiteral(key_text), key_span);
+                        let span = expr.span.clone();
+                        expr = Expr::new(
+                            ExprKind::Index {
+                                object: Box::new(expr),
+                                index: Box::new(key),
+                            },
+                            span,
+                        );
+                    }
+                    TokenKind::CharLiteral => {
+                        // Map access with char key: m.'name'
+                        self.advance();
+                        let key_text = next_token.text.clone();
+                        let key_span = self.span_from(next_token.line, next_token.column);
+                        let key = Expr::new(ExprKind::StringLiteral(key_text), key_span);
+                        let span = expr.span.clone();
+                        expr = Expr::new(
+                            ExprKind::Index {
+                                object: Box::new(expr),
+                                index: Box::new(key),
+                            },
+                            span,
+                        );
+                    }
+                    TokenKind::TemplateString => {
+                        // Map access with template string key: m.`prefix_{key}`
+                        self.advance();
+                        let key_text = next_token.text.clone();
+                        let key_span = self.span_from(next_token.line, next_token.column);
+                        let key = self.parse_template_literal(&key_text, key_span)?;
+                        let span = expr.span.clone();
+                        expr = Expr::new(
+                            ExprKind::Index {
+                                object: Box::new(expr),
+                                index: Box::new(key),
+                            },
+                            span,
+                        );
+                    }
+                    _ => {
+                        // Regular field access or method call
+                        let name = self.consume_ident("expected field or method name")?;
+
+                        if self.match_kind(TokenKind::LParen) {
+                            // Method call
+                            let args = self.parse_args()?;
+                            self.consume(TokenKind::RParen, "expected ')'")?;
+                            let span = expr.span.clone();
+                            expr = Expr::new(
+                                ExprKind::MethodCall {
+                                    object: Box::new(expr),
+                                    method: name,
+                                    args,
+                                },
+                                span,
+                            );
+                        } else {
+                            let span = expr.span.clone();
+                            expr = Expr::new(
+                                ExprKind::FieldAccess {
+                                    object: Box::new(expr),
+                                    field: name,
+                                },
+                                span,
+                            );
+                        }
+                    }
                 }
             } else if self.match_kind(TokenKind::LBracket) {
                 // Index access
@@ -939,9 +1006,51 @@ impl Parser {
                 let span = expr.span.clone();
                 expr = Expr::new(ExprKind::ForceUnwrap(Box::new(expr)), span);
             } else if self.match_kind(TokenKind::LParen) {
-                // Function call
-                let args = self.parse_args()?;
-                self.consume(TokenKind::RParen, "expected ')'")?;
+                // Function call with potential trailing lambda
+                let call_args = self.parse_call_args()?;
+
+                // Only consume RParen if not already consumed by trailing lambda
+                if !call_args.rparen_consumed {
+                    self.consume(TokenKind::RParen, "expected ')'")?;
+                }
+
+                // Add trailing lambda to args if present
+                let mut args = call_args.args;
+                if let Some(lambda) = call_args.trailing_lambda {
+                    args.push(lambda);
+                }
+
+                // Check for trailing lambda block without params: test(1, 2) { }
+                let trailing_block = if self.check(TokenKind::LBrace) {
+                    // Check if this is a map literal or trailing lambda
+                    // Trailing lambda if the next token after { is not an identifier followed by :
+                    let saved = self.current;
+                    self.advance(); // consume LBrace
+                    if self.check(TokenKind::Ident) && self.peek_next().kind == TokenKind::Colon {
+                        // This is a map literal, restore position
+                        self.current = saved;
+                        None
+                    } else {
+                        // This is a trailing lambda block
+                        let stmts = self.parse_block()?;
+                        let span = self.span_from(1, 1);
+                        Some(Expr::new(
+                            ExprKind::Lambda {
+                                params: vec![],
+                                return_type: None,
+                                body: LambdaBody::Block(stmts),
+                            },
+                            span,
+                        ))
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(lambda) = trailing_block {
+                    args.push(lambda);
+                }
+
                 let span = expr.span.clone();
                 expr = Expr::new(
                     ExprKind::Call {
@@ -1109,10 +1218,11 @@ impl Parser {
                 Ok(Expr::new(ExprKind::Ident("string".to_string()), span))
             }
             TokenKind::LParen => {
-                self.advance();
                 // Could be grouping, tuple, or lambda
+                // Don't consume LParen yet - let parse_lambda handle it if needed
                 if self.check(TokenKind::RParen) {
-                    // Empty parens - lambda with no params
+                    // Empty parens - could be () for grouping or lambda
+                    self.advance(); // consume LParen
                     self.consume(TokenKind::RParen, "expected ')'")?;
                     if self.match_kind(TokenKind::Arrow) {
                         let body = self.parse_lambda_body()?;
@@ -1128,18 +1238,19 @@ impl Parser {
                     return Err(ParserError::ExpectedExpression);
                 }
 
-                // Check if this is a lambda
+                // Check if this is a lambda (peek ahead without consuming LParen)
                 if self.is_lambda_start() {
                     return self.parse_lambda();
                 }
 
                 // Regular expression grouping
+                self.advance(); // consume LParen
                 let expr = self.parse_expr()?;
                 self.consume(TokenKind::RParen, "expected ')'")?;
                 Ok(expr)
             }
             TokenKind::LBrace => {
-                // Could be block expression or map literal
+                // Map literal only - block expressions (lambdas) are handled in parse_postfix
                 self.advance();
                 if self.check(TokenKind::RBrace) {
                     // Empty map
@@ -1147,24 +1258,55 @@ impl Parser {
                     return Ok(Expr::new(ExprKind::MapLiteral(vec![]), span));
                 }
 
-                // Check first element to determine if map or block
-                if self.check(TokenKind::Ident) && self.peek_next().kind == TokenKind::Colon {
-                    // Map literal
-                    let entries = self.parse_map_entries()?;
-                    self.consume(TokenKind::RBrace, "expected '}'")?;
-                    return Ok(Expr::new(ExprKind::MapLiteral(entries), span));
+                // Check if this looks like a map literal: { key: value, ... }
+                // Map literals start with an identifier, string literal, or expression followed by colon
+                // For simple cases, check if next token after current is Colon
+                // For complex cases (function calls), we save position and try to parse
+                let current = self.peek();
+                let is_simple_key = matches!(
+                    current.kind,
+                    TokenKind::StringLiteral
+                    | TokenKind::CharLiteral
+                    | TokenKind::TemplateString
+                    | TokenKind::Ident
+                    | TokenKind::IntLiteral
+                    | TokenKind::FloatLiteral
+                    | TokenKind::True
+                    | TokenKind::False
+                    | TokenKind::Null
+                );
+
+                let is_map_like = if is_simple_key && self.peek_next().kind == TokenKind::Colon {
+                    // For simple keys followed by colon, it's definitely a map
+                    true
+                } else {
+                    // For complex expressions, try to parse and check if followed by colon
+                    // Save current position
+                    let saved = self.current;
+
+                    // Try to parse an expression
+                    let result = self.parse_expr();
+
+                    // Check if next token is colon
+                    let is_colon = self.check(TokenKind::Colon);
+
+                    // Restore position
+                    self.current = saved;
+
+                    // If parsing succeeded and is followed by colon, it's a map
+                    result.is_ok() && is_colon
+                };
+
+                if !is_map_like {
+                    // Not a map literal - this is likely a statement block, return error
+                    // to let the caller handle it
+                    return Err(ParserError::ExpectedExpression);
                 }
 
-                // Block expression
-                let stmts = self.parse_block()?;
-                Ok(Expr::new(
-                    ExprKind::Lambda {
-                        params: vec![],
-                        return_type: None,
-                        body: LambdaBody::Block(stmts),
-                    },
-                    span,
-                ))
+                // Must be a map literal
+                let entries = self.parse_map_entries()?;
+                self.consume(TokenKind::RBrace, "expected '}'")?;
+                Ok(Expr::new(ExprKind::MapLiteral(entries), span))
             }
             TokenKind::LBracket => {
                 // Array literal
@@ -1351,30 +1493,42 @@ impl Parser {
     }
 
     fn is_lambda_start(&mut self) -> bool {
+        // We're at LParen, need to check if this is a lambda
         let saved = self.current;
+        self.advance(); // skip LParen
         let result = self.try_parse_lambda_params();
         self.current = saved;
         result
     }
 
     fn try_parse_lambda_params(&mut self) -> bool {
+        // We're now after LParen, check for params
+        // Handle empty params case: ()
+        if self.check(TokenKind::RParen) {
+            self.advance();
+            // After ), we expect either -> or a return type followed by ->
+            return self.check(TokenKind::Arrow) || self.check_type_start();
+        }
+
+        // Support both typed params (a: int, b: int) and inferred params (a, b)
         loop {
             if !self.check(TokenKind::Ident) {
                 return false;
             }
             self.advance();
 
-            if !self.check(TokenKind::Colon) {
-                return false;
-            }
-            self.advance();
-
-            if !self.check_type_start() {
-                return false;
-            }
-            while self.check_type_start() {
+            // Check for type annotation (optional)
+            if self.check(TokenKind::Colon) {
+                // Type annotation present: a: int
                 self.advance();
+                if !self.check_type_start() {
+                    return false;
+                }
+                while self.check_type_start() {
+                    self.advance();
+                }
             }
+            // No type annotation: just 'a' - that's fine for type inference
 
             if self.match_kind(TokenKind::Comma) {
                 continue;
@@ -1384,7 +1538,8 @@ impl Parser {
 
         self.check(TokenKind::RParen) && {
             self.advance();
-            self.check(TokenKind::Arrow)
+            // After ), we expect either -> or a return type followed by ->
+            self.check(TokenKind::Arrow) || self.check_type_start()
         }
     }
 
@@ -1413,6 +1568,7 @@ impl Parser {
                 | TokenKind::Void
                 | TokenKind::Ident
                 | TokenKind::Star
+                | TokenKind::Func  // Support function type as return type or annotation
         )
     }
 
@@ -1424,8 +1580,15 @@ impl Parser {
 
         self.consume(TokenKind::RParen, "expected ')'")?;
 
-        let return_type = if self.match_kind(TokenKind::Arrow) {
-            if self.check_type_start() && !self.check(TokenKind::LBrace) {
+        // Parse return type if present: (params) ReturnType -> body
+        // But only if there's a type followed by ->
+        let return_type = if self.check_type_start() {
+            // Peek ahead to see if this is a return type (type followed by ->)
+            let saved = self.current;
+            let _ = self.parse_type();
+            let has_arrow = self.check(TokenKind::Arrow);
+            self.current = saved;
+            if has_arrow {
                 Some(self.parse_type()?)
             } else {
                 None
@@ -1486,6 +1649,166 @@ impl Parser {
         }
     }
 
+    fn parse_call_args(&mut self) -> Result<CallArgs, ParserError> {
+        let mut args = Vec::new();
+        let mut trailing_lambda = None;
+        let mut rparen_consumed = false;
+
+        if !self.check(TokenKind::RParen) {
+            loop {
+                // Parse argument
+                let arg = self.parse_expr()?;
+
+                // Check if this is a typed lambda param: x: int
+                // This happens when we have comma-separated trailing lambda params
+                if self.check(TokenKind::Colon) && matches!(arg.kind, ExprKind::Ident(_)) {
+                    // This might be a trailing lambda param - look ahead
+                    if self.is_typed_trailing_lambda_param() {
+                        // Parse the type annotation
+                        self.consume(TokenKind::Colon, "expected ':'")?;
+                        let _type = self.parse_type()?;
+
+                        // Collect all params including the one we just started
+                        let mut params = vec![LambdaParam {
+                            name: match arg.kind {
+                                ExprKind::Ident(name) => name,
+                                _ => unreachable!(),
+                            },
+                            type_annotation: Some(_type),
+                        }];
+
+                        // Parse remaining params
+                        while self.match_kind(TokenKind::Comma) {
+                            let name = self.consume_ident("expected parameter name")?;
+                            let type_annotation = if self.match_kind(TokenKind::Colon) {
+                                Some(self.parse_type()?)
+                            } else {
+                                None
+                            };
+                            params.push(LambdaParam { name, type_annotation });
+                        }
+
+                        let lambda = self.parse_trailing_lambda_body(params)?;
+                        trailing_lambda = Some(lambda);
+                        rparen_consumed = true; // parse_trailing_lambda_body consumes RParen
+                        break;
+                    }
+                }
+
+                args.push(arg);
+
+                // Check for comma (more args) or semicolon (trailing lambda params)
+                if self.match_kind(TokenKind::Comma) {
+                    continue;
+                }
+
+                // Check for trailing lambda params after semicolon: (1, 2; x, y)
+                if self.match_kind(TokenKind::Semicolon) {
+                    // Parse trailing lambda params
+                    let params = self.parse_trailing_lambda_params()?;
+                    let lambda = self.parse_trailing_lambda_body(params)?;
+                    trailing_lambda = Some(lambda);
+                    rparen_consumed = true; // parse_trailing_lambda_body consumes RParen
+                    break;
+                }
+
+                break;
+            }
+        }
+
+        Ok(CallArgs { args, trailing_lambda, rparen_consumed })
+    }
+
+    /// Check if current position looks like a typed trailing lambda param
+    fn is_typed_trailing_lambda_param(&self) -> bool {
+        // We're at ':', check if followed by type and then ')' or ','
+        // This is called after we've seen an identifier
+        if !self.check(TokenKind::Colon) {
+            return false;
+        }
+        // Peek ahead to see if this looks like a type annotation
+        // We need to look at the token after ':'
+        if self.current + 1 < self.tokens.len() {
+            self.check_type_start_at(self.current + 1)
+        } else {
+            false
+        }
+    }
+
+    /// Check if token at given position is a type start
+    fn check_type_start_at(&self, pos: usize) -> bool {
+        if pos >= self.tokens.len() {
+            return false;
+        }
+        matches!(
+            self.tokens[pos].kind,
+            TokenKind::Int8
+                | TokenKind::Int16
+                | TokenKind::Int32
+                | TokenKind::Int64
+                | TokenKind::Int128
+                | TokenKind::UInt8
+                | TokenKind::UInt16
+                | TokenKind::UInt32
+                | TokenKind::UInt64
+                | TokenKind::UInt128
+                | TokenKind::Byte
+                | TokenKind::Float8
+                | TokenKind::Float16
+                | TokenKind::Float32
+                | TokenKind::Float64
+                | TokenKind::Float128
+                | TokenKind::Char
+                | TokenKind::Bool
+                | TokenKind::String
+                | TokenKind::Void
+                | TokenKind::Ident
+                | TokenKind::Star
+        )
+    }
+
+    /// Parse trailing lambda params (after semicolon)
+    fn parse_trailing_lambda_params(&mut self) -> Result<Vec<LambdaParam>, ParserError> {
+        let mut params = Vec::new();
+
+        loop {
+            let name = self.consume_ident("expected parameter name")?;
+            let type_annotation = if self.match_kind(TokenKind::Colon) {
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+
+            params.push(LambdaParam { name, type_annotation });
+
+            if !self.match_kind(TokenKind::Comma) {
+                break;
+            }
+        }
+
+        Ok(params)
+    }
+
+    /// Parse trailing lambda body (the block after params)
+    fn parse_trailing_lambda_body(&mut self, params: Vec<LambdaParam>) -> Result<Expr, ParserError> {
+        self.consume(TokenKind::RParen, "expected ')'")?;
+
+        // The body must be a block
+        self.consume(TokenKind::LBrace, "expected '{' for trailing lambda body")?;
+        let stmts = self.parse_block()?;
+
+        let span = self.span_from(1, 1);
+        Ok(Expr::new(
+            ExprKind::Lambda {
+                params,
+                return_type: None,
+                body: LambdaBody::Block(stmts),
+            },
+            span,
+        ))
+    }
+
+    /// Parse args for function call (without trailing lambda support)
     fn parse_args(&mut self) -> Result<Vec<Expr>, ParserError> {
         let mut args = Vec::new();
 
@@ -1686,7 +2009,7 @@ impl Parser {
                 }
             }
             TokenKind::Func => {
-                // Function type: func(A, B) R
+                // Function type: func(A, B) R or func(A, B) -> R
                 self.advance();
                 self.consume(TokenKind::LParen, "expected '('")?;
 
@@ -1702,7 +2025,10 @@ impl Parser {
 
                 self.consume(TokenKind::RParen, "expected ')'")?;
 
+                // Return type: either -> Type or just Type (without ->)
                 let return_type = if self.match_kind(TokenKind::Arrow) {
+                    self.parse_type()?
+                } else if self.check_type_start() {
                     self.parse_type()?
                 } else {
                     Type::Void
@@ -1835,6 +2161,152 @@ mod tests {
             for (item in list) {
                 print(item)
             }
+        "#;
+        let mut lexer = Lexer::new(source);
+        let mut parser = Parser::new(&mut lexer).unwrap();
+        let file = parser.parse().unwrap();
+        assert!(file.declarations.len() >= 1);
+    }
+
+    // ==================== Lambda Tests ====================
+
+    #[test]
+    fn test_parse_lambda_basic() {
+        // Basic lambda with expression body
+        let source = r#"
+            let add = (a, b) -> a + b
+        "#;
+        let mut lexer = Lexer::new(source);
+        let mut parser = Parser::new(&mut lexer).unwrap();
+        let file = parser.parse().unwrap();
+        assert!(file.declarations.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_lambda_with_types() {
+        // Lambda with type annotations
+        let source = r#"
+            let add = (a: int32, b: int32) -> a + b
+        "#;
+        let mut lexer = Lexer::new(source);
+        let mut parser = Parser::new(&mut lexer).unwrap();
+        let file = parser.parse().unwrap();
+        assert!(file.declarations.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_lambda_with_return_type() {
+        // Lambda with explicit return type
+        let source = r#"
+            let add = (a: int32, b: int32) int32 -> a + b
+        "#;
+        let mut lexer = Lexer::new(source);
+        let mut parser = Parser::new(&mut lexer).unwrap();
+        let file = parser.parse().unwrap();
+        assert!(file.declarations.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_lambda_block_body() {
+        // Lambda with block body
+        let source = r#"
+            let multiply = (a, b) -> {
+                return a * b
+            }
+        "#;
+        let mut lexer = Lexer::new(source);
+        let mut parser = Parser::new(&mut lexer).unwrap();
+        let file = parser.parse().unwrap();
+        assert!(file.declarations.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_lambda_no_params() {
+        // Lambda with no parameters
+        let source = r#"
+            let getValue = () -> 42
+        "#;
+        let mut lexer = Lexer::new(source);
+        let mut parser = Parser::new(&mut lexer).unwrap();
+        let file = parser.parse().unwrap();
+        assert!(file.declarations.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_lambda_as_arg() {
+        // Lambda as function argument
+        let source = r#"
+            apply([1, 2, 3], (x) -> x * 2)
+        "#;
+        let mut lexer = Lexer::new(source);
+        let mut parser = Parser::new(&mut lexer).unwrap();
+        let file = parser.parse().unwrap();
+        assert!(file.declarations.len() >= 1);
+    }
+
+    // ==================== Trailing Lambda Tests ====================
+
+    #[test]
+    fn test_parse_trailing_lambda_no_params() {
+        // Trailing lambda without params: test { }
+        let source = r#"
+            forEach {
+                print("hello")
+            }
+        "#;
+        let mut lexer = Lexer::new(source);
+        let mut parser = Parser::new(&mut lexer).unwrap();
+        let file = parser.parse().unwrap();
+        assert!(file.declarations.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_trailing_lambda_with_args() {
+        // Trailing lambda after args: test(1, 2) { }
+        let source = r#"
+            test(1, 2) {
+                print("hello")
+            }
+        "#;
+        let mut lexer = Lexer::new(source);
+        let mut parser = Parser::new(&mut lexer).unwrap();
+        let file = parser.parse().unwrap();
+        assert!(file.declarations.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_trailing_lambda_with_semicolon() {
+        // Trailing lambda with semicolon: test(1, 2; x, y) { }
+        let source = r#"
+            test(1, 2; x, y) {
+                print(x + y)
+            }
+        "#;
+        let mut lexer = Lexer::new(source);
+        let mut parser = Parser::new(&mut lexer).unwrap();
+        let file = parser.parse().unwrap();
+        assert!(file.declarations.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_trailing_lambda_typed_params() {
+        // Trailing lambda with typed params: test(1, 2, x: int, y: int) { }
+        let source = r#"
+            test(1, 2, x: int32, y: int32) {
+                print(x + y)
+            }
+        "#;
+        let mut lexer = Lexer::new(source);
+        let mut parser = Parser::new(&mut lexer).unwrap();
+        let file = parser.parse().unwrap();
+        assert!(file.declarations.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_function_type() {
+        // Function type annotation
+        let source = r#"
+            let callback: func(int32, int32) int32 = add
         "#;
         let mut lexer = Lexer::new(source);
         let mut parser = Parser::new(&mut lexer).unwrap();

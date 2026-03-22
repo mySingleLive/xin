@@ -329,3 +329,188 @@ void* xin_array_pop(xin_array* arr) {
 int64_t xin_array_len(xin_array* arr) {
     return arr->length;
 }
+
+// ========== Map Runtime ==========
+
+// Map 条目结构
+typedef struct xin_map_entry {
+    char* key;                  // 键（字符串）
+    void* value;                // 值（通用指针）
+    struct xin_map_entry* next; // 链表下一个节点（用于哈希冲突）
+} xin_map_entry;
+
+// Map 结构（使用简单的哈希表实现）
+typedef struct {
+    xin_map_entry** buckets;    // 哈希桶数组
+    int64_t bucket_count;       // 桶数量
+    int64_t size;               // 键值对数量
+} xin_map;
+
+// 简单的字符串哈希函数（djb2）
+static uint64_t map_hash(const char* str) {
+    uint64_t hash = 5381;
+    int c;
+    while ((c = *str++)) {
+        hash = ((hash << 5) + hash) + c;  // hash * 33 + c
+    }
+    return hash;
+}
+
+// 创建 Map
+xin_map* xin_map_new() {
+    xin_map* map = (xin_map*)malloc(sizeof(xin_map));
+    if (!map) return NULL;
+
+    // 初始 16 个桶
+    int64_t initial_buckets = 16;
+    map->buckets = (xin_map_entry**)calloc(initial_buckets, sizeof(xin_map_entry*));
+    if (!map->buckets) {
+        free(map);
+        return NULL;
+    }
+
+    map->bucket_count = initial_buckets;
+    map->size = 0;
+    return map;
+}
+
+// 设置键值对
+void xin_map_set(xin_map* map, const char* key, void* value) {
+    uint64_t hash = map_hash(key);
+    int64_t index = hash % map->bucket_count;
+
+    // 查找是否已存在该键
+    xin_map_entry* entry = map->buckets[index];
+    while (entry) {
+        if (strcmp(entry->key, key) == 0) {
+            // 键已存在，更新值
+            entry->value = value;
+            return;
+        }
+        entry = entry->next;
+    }
+
+    // 创建新条目
+    xin_map_entry* new_entry = (xin_map_entry*)malloc(sizeof(xin_map_entry));
+    if (!new_entry) {
+        fprintf(stderr, "MemoryError: failed to allocate map entry\n");
+        exit(1);
+    }
+
+    // 复制键字符串
+    new_entry->key = strdup(key);
+    if (!new_entry->key) {
+        free(new_entry);
+        fprintf(stderr, "MemoryError: failed to duplicate key\n");
+        exit(1);
+    }
+
+    new_entry->value = value;
+    new_entry->next = map->buckets[index];
+    map->buckets[index] = new_entry;
+    map->size++;
+}
+
+// 获取值
+void* xin_map_get(xin_map* map, const char* key) {
+    uint64_t hash = map_hash(key);
+    int64_t index = hash % map->bucket_count;
+
+    xin_map_entry* entry = map->buckets[index];
+    while (entry) {
+        if (strcmp(entry->key, key) == 0) {
+            return entry->value;
+        }
+        entry = entry->next;
+    }
+
+    return NULL;  // 键不存在
+}
+
+// 获取键值对数量
+int64_t xin_map_len(xin_map* map) {
+    return map->size;
+}
+
+// 检查键是否存在
+int xin_map_has(xin_map* map, const char* key) {
+    uint64_t hash = map_hash(key);
+    int64_t index = hash % map->bucket_count;
+
+    xin_map_entry* entry = map->buckets[index];
+    while (entry) {
+        if (strcmp(entry->key, key) == 0) {
+            return 1;  // 存在
+        }
+        entry = entry->next;
+    }
+
+    return 0;  // 不存在
+}
+
+// 删除键值对
+int xin_map_remove(xin_map* map, const char* key) {
+    uint64_t hash = map_hash(key);
+    int64_t index = hash % map->bucket_count;
+
+    xin_map_entry* entry = map->buckets[index];
+    xin_map_entry* prev = NULL;
+
+    while (entry) {
+        if (strcmp(entry->key, key) == 0) {
+            // 找到了，删除
+            if (prev) {
+                prev->next = entry->next;
+            } else {
+                map->buckets[index] = entry->next;
+            }
+
+            free(entry->key);
+            free(entry);
+            map->size--;
+            return 1;  // 删除成功
+        }
+        prev = entry;
+        entry = entry->next;
+    }
+
+    return 0;  // 键不存在
+}
+
+// 获取所有键（返回数组）
+xin_array* xin_map_keys(xin_map* map) {
+    xin_array* keys = xin_array_new(map->size);
+    if (!keys) return NULL;
+
+    for (int64_t i = 0; i < map->bucket_count; i++) {
+        xin_map_entry* entry = map->buckets[i];
+        while (entry) {
+            // 复制键字符串作为数组元素
+            char* key_copy = strdup(entry->key);
+            if (!key_copy) {
+                fprintf(stderr, "MemoryError: failed to duplicate key\n");
+                exit(1);
+            }
+            xin_array_push(keys, key_copy);
+            entry = entry->next;
+        }
+    }
+
+    return keys;
+}
+
+// 获取所有值（返回数组）
+xin_array* xin_map_values(xin_map* map) {
+    xin_array* values = xin_array_new(map->size);
+    if (!values) return NULL;
+
+    for (int64_t i = 0; i < map->bucket_count; i++) {
+        xin_map_entry* entry = map->buckets[i];
+        while (entry) {
+            xin_array_push(values, entry->value);
+            entry = entry->next;
+        }
+    }
+
+    return values;
+}

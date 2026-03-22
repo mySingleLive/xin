@@ -1,0 +1,38 @@
+// test_map_runtime.xin - Test Map runtime functionality
+
+func main() {
+    // Test Map creation and basic operations (use var for mutable map)
+    var m = { "name": "Alice", "age": 30 }
+
+    // Test map_len
+    let size = m.map_len()
+    printf("Map size: %d\n", size)
+
+    // Test has
+    let has_name = m.has("name")
+    printf("Has name: %b\n", has_name)
+
+    let has_unknown = m.has("unknown")
+    printf("Has unknown: %b\n", has_unknown)
+
+    // Test remove
+    let removed = m.remove("age")
+    printf("Removed age: %b\n", removed)
+
+    let size_after_remove = m.map_len()
+    printf("Size after remove: %d\n", size_after_remove)
+
+    // Test empty map
+    let empty = {}
+    let empty_size = empty.map_len()
+    printf("Empty map size: %d\n", empty_size)
+
+    // Test map index access
+    let value = m["name"]
+    printf("Value for 'name': %s\n", value)
+
+    // Test map index assignment
+    m["city"] = "Beijing"
+    let has_city = m.has("city")
+    printf("Has city after assignment: %b\n", has_city)
+}

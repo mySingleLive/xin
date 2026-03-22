@@ -56,6 +56,9 @@ impl AOTCodeGenerator {
         // First, declare array runtime functions
         self.declare_array_runtime_functions()?;
 
+        // Then, declare map runtime functions
+        self.declare_map_runtime_functions()?;
+
         // Then, declare all external functions from IR
         for extern_func in &module.extern_functions {
             self.declare_extern_function(extern_func)?;
@@ -142,6 +145,94 @@ impl AOTCodeGenerator {
             .map_err(|e| format!("Failed to declare xin_array_len: {}", e))?;
         self.extern_func_ids.insert("xin_array_len".to_string(), func_id);
         self.func_sigs.insert("xin_array_len".to_string(), sig);
+
+        Ok(())
+    }
+
+    /// Declare map runtime functions
+    fn declare_map_runtime_functions(&mut self) -> Result<(), String> {
+        // xin_map_new() -> xin_map*
+        let mut sig = self.module.make_signature();
+        sig.returns.push(AbiParam::new(self.pointer_type));
+        let func_id = self.module
+            .declare_function("xin_map_new", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_map_new: {}", e))?;
+        self.extern_func_ids.insert("xin_map_new".to_string(), func_id);
+        self.func_sigs.insert("xin_map_new".to_string(), sig);
+
+        // xin_map_set(xin_map* map, const char* key, void* value) -> void
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(self.pointer_type));
+        let func_id = self.module
+            .declare_function("xin_map_set", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_map_set: {}", e))?;
+        self.extern_func_ids.insert("xin_map_set".to_string(), func_id);
+        self.func_sigs.insert("xin_map_set".to_string(), sig);
+
+        // xin_map_get(xin_map* map, const char* key) -> void*
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.returns.push(AbiParam::new(self.pointer_type));
+        let func_id = self.module
+            .declare_function("xin_map_get", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_map_get: {}", e))?;
+        self.extern_func_ids.insert("xin_map_get".to_string(), func_id);
+        self.func_sigs.insert("xin_map_get".to_string(), sig);
+
+        // xin_map_len(xin_map* map) -> int64_t
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = self.module
+            .declare_function("xin_map_len", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_map_len: {}", e))?;
+        self.extern_func_ids.insert("xin_map_len".to_string(), func_id);
+        self.func_sigs.insert("xin_map_len".to_string(), sig);
+
+        // xin_map_has(xin_map* map, const char* key) -> int
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.returns.push(AbiParam::new(types::I32));
+        let func_id = self.module
+            .declare_function("xin_map_has", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_map_has: {}", e))?;
+        self.extern_func_ids.insert("xin_map_has".to_string(), func_id);
+        self.func_sigs.insert("xin_map_has".to_string(), sig);
+
+        // xin_map_remove(xin_map* map, const char* key) -> int
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.returns.push(AbiParam::new(types::I32));
+        let func_id = self.module
+            .declare_function("xin_map_remove", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_map_remove: {}", e))?;
+        self.extern_func_ids.insert("xin_map_remove".to_string(), func_id);
+        self.func_sigs.insert("xin_map_remove".to_string(), sig);
+
+        // xin_map_keys(xin_map* map) -> xin_array*
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.returns.push(AbiParam::new(self.pointer_type));
+        let func_id = self.module
+            .declare_function("xin_map_keys", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_map_keys: {}", e))?;
+        self.extern_func_ids.insert("xin_map_keys".to_string(), func_id);
+        self.func_sigs.insert("xin_map_keys".to_string(), sig);
+
+        // xin_map_values(xin_map* map) -> xin_array*
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.returns.push(AbiParam::new(self.pointer_type));
+        let func_id = self.module
+            .declare_function("xin_map_values", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_map_values: {}", e))?;
+        self.extern_func_ids.insert("xin_map_values".to_string(), func_id);
+        self.func_sigs.insert("xin_map_values".to_string(), sig);
 
         Ok(())
     }
@@ -934,6 +1025,126 @@ impl AOTCodeGenerator {
                 // TODO: Implement break/continue codegen (Task 3.3)
                 // These require loop context tracking to jump to the appropriate label
             }
+
+            // Map instructions
+            Instruction::MapNew { result } => {
+                // Call xin_map_new() -> xin_map*
+                let func_ref = self.get_or_create_func_ref(
+                    builder,
+                    "xin_map_new",
+                    func_ref_cache,
+                )?;
+
+                let call_val = builder.ins().call(func_ref, &[]);
+                let map_ptr = builder.inst_results(call_val)[0];
+                self.store_variable(builder, result, map_ptr, variables, var_counter, self.pointer_type);
+            }
+            Instruction::MapSet { map, key, value } => {
+                // Call xin_map_set(map, key, value) -> void
+                let map_val = self.load_variable(builder, map, variables)?;
+                let key_val = self.load_variable(builder, key, variables)?;
+                let val = self.load_variable(builder, value, variables)?;
+
+                let func_ref = self.get_or_create_func_ref(
+                    builder,
+                    "xin_map_set",
+                    func_ref_cache,
+                )?;
+
+                builder.ins().call(func_ref, &[map_val, key_val, val]);
+            }
+            Instruction::MapGet { result, map, key } => {
+                // Call xin_map_get(map, key) -> void*
+                let map_val = self.load_variable(builder, map, variables)?;
+                let key_val = self.load_variable(builder, key, variables)?;
+
+                let func_ref = self.get_or_create_func_ref(
+                    builder,
+                    "xin_map_get",
+                    func_ref_cache,
+                )?;
+
+                let call_val = builder.ins().call(func_ref, &[map_val, key_val]);
+                let val = builder.inst_results(call_val)[0];
+                self.store_variable(builder, result, val, variables, var_counter, self.pointer_type);
+            }
+            Instruction::MapLen { result, map } => {
+                // Call xin_map_len(map) -> int64_t
+                let map_val = self.load_variable(builder, map, variables)?;
+
+                let func_ref = self.get_or_create_func_ref(
+                    builder,
+                    "xin_map_len",
+                    func_ref_cache,
+                )?;
+
+                let call_val = builder.ins().call(func_ref, &[map_val]);
+                let len = builder.inst_results(call_val)[0];
+                self.store_variable(builder, result, len, variables, var_counter, types::I64);
+            }
+            Instruction::MapHas { result, map, key } => {
+                // Call xin_map_has(map, key) -> int
+                let map_val = self.load_variable(builder, map, variables)?;
+                let key_val = self.load_variable(builder, key, variables)?;
+
+                let func_ref = self.get_or_create_func_ref(
+                    builder,
+                    "xin_map_has",
+                    func_ref_cache,
+                )?;
+
+                let call_val = builder.ins().call(func_ref, &[map_val, key_val]);
+                let has = builder.inst_results(call_val)[0];
+                // Convert i32 to i64 for consistency with bool type
+                let has_i64 = builder.ins().uextend(types::I64, has);
+                self.store_variable(builder, result, has_i64, variables, var_counter, types::I64);
+            }
+            Instruction::MapRemove { result, map, key } => {
+                // Call xin_map_remove(map, key) -> int
+                let map_val = self.load_variable(builder, map, variables)?;
+                let key_val = self.load_variable(builder, key, variables)?;
+
+                let func_ref = self.get_or_create_func_ref(
+                    builder,
+                    "xin_map_remove",
+                    func_ref_cache,
+                )?;
+
+                let call_val = builder.ins().call(func_ref, &[map_val, key_val]);
+                let removed = builder.inst_results(call_val)[0];
+                // Convert i32 to i64 for consistency with bool type
+                let removed_i64 = builder.ins().uextend(types::I64, removed);
+                self.store_variable(builder, result, removed_i64, variables, var_counter, types::I64);
+            }
+            Instruction::MapKeys { result, map } => {
+                // Call xin_map_keys(map) -> xin_array*
+                let map_val = self.load_variable(builder, map, variables)?;
+
+                let func_ref = self.get_or_create_func_ref(
+                    builder,
+                    "xin_map_keys",
+                    func_ref_cache,
+                )?;
+
+                let call_val = builder.ins().call(func_ref, &[map_val]);
+                let keys = builder.inst_results(call_val)[0];
+                self.store_variable(builder, result, keys, variables, var_counter, self.pointer_type);
+            }
+            Instruction::MapValues { result, map } => {
+                // Call xin_map_values(map) -> xin_array*
+                let map_val = self.load_variable(builder, map, variables)?;
+
+                let func_ref = self.get_or_create_func_ref(
+                    builder,
+                    "xin_map_values",
+                    func_ref_cache,
+                )?;
+
+                let call_val = builder.ins().call(func_ref, &[map_val]);
+                let values = builder.inst_results(call_val)[0];
+                self.store_variable(builder, result, values, variables, var_counter, self.pointer_type);
+            }
+
             Instruction::TypeCast { result, value, from_type, to_type } => {
                 let val = self.load_variable(builder, value, variables)?;
                 let cast_val = self.emit_type_cast(builder, val, from_type, to_type);

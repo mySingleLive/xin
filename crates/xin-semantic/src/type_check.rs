@@ -11,6 +11,8 @@ pub struct TypeChecker {
     diagnostics: Vec<Diagnostic>,
     current_function_return_type: Option<Type>,
     loop_depth: usize,
+    /// Expected type for the current expression (used for Lambda type inference)
+    expected_type: Option<Type>,
 }
 
 impl TypeChecker {
@@ -20,6 +22,7 @@ impl TypeChecker {
             diagnostics: Vec::new(),
             current_function_return_type: None,
             loop_depth: 0,
+            expected_type: None,
         }
     }
 
@@ -96,6 +99,31 @@ impl TypeChecker {
     fn collect_declaration(&mut self, decl: &Decl) {
         match &decl.kind {
             DeclKind::Func(f) => {
+                // Special handling for __top_level__ pseudo-function
+                // Collect top-level variable declarations in global scope
+                if f.name == "__top_level__" {
+                    if let FuncBody::Block(stmts) = &f.body {
+                        for stmt in stmts {
+                            if let StmtKind::VarDecl(var) = &stmt.kind {
+                                // For top-level vars, we can't infer type from value yet
+                                // Just register them as placeholder for now
+                                if var.value.is_some() || var.type_annotation.is_some() {
+                                    // Will be properly typed during check pass
+                                    let symbol = Symbol::variable(
+                                        var.name.clone(),
+                                        var.mutable,
+                                        var.type_annotation.clone().unwrap_or(Type::Object),
+                                        0, // Global scope level
+                                        var.object_mutable,
+                                    );
+                                    self.scopes.define(&var.name, symbol);
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+
                 let params: Vec<(String, Type, bool)> = f
                     .params
                     .iter()
@@ -687,7 +715,11 @@ impl TypeChecker {
                         }
 
                         for (arg, (_, param_type, _)) in args.iter().zip(params.iter()) {
+                            // Set expected type for Lambda type inference
+                            self.expected_type = Some(param_type.clone());
                             let arg_type = self.check_expr(arg)?;
+                            self.expected_type = None;
+
                             if !self.types_compatible(param_type, &arg_type) {
                                 return Err(SemanticError::TypeMismatch {
                                     expected: param_type.clone(),
@@ -713,7 +745,11 @@ impl TypeChecker {
                         }
 
                         for (arg, param_type) in args.iter().zip(params.iter()) {
+                            // Set expected type for Lambda type inference
+                            self.expected_type = Some(param_type.clone());
                             let arg_type = self.check_expr(arg)?;
+                            self.expected_type = None;
+
                             if !self.types_compatible(param_type, &arg_type) {
                                 return Err(SemanticError::TypeMismatch {
                                     expected: param_type.clone(),
@@ -789,6 +825,79 @@ impl TypeChecker {
                             return Ok(Type::Int64);
                         }
                         _ => {}
+                    }
+                }
+
+                // Handle Map methods (map_len, keys, values, has, remove)
+                if let Type::Generic { name, args: _ } = &obj_type {
+                    if name == "Map" {
+                        match method.as_str() {
+                            "map_len" => {
+                                // map_len takes no arguments and returns int64
+                                if !args.is_empty() {
+                                    return Err(SemanticError::WrongNumberOfArguments {
+                                        expected: 0,
+                                        found: args.len(),
+                                    });
+                                }
+                                return Ok(Type::Int64);
+                            }
+                            "keys" => {
+                                // keys takes no arguments and returns string[] (array of keys)
+                                if !args.is_empty() {
+                                    return Err(SemanticError::WrongNumberOfArguments {
+                                        expected: 0,
+                                        found: args.len(),
+                                    });
+                                }
+                                return Ok(Type::Array(Box::new(Type::String)));
+                            }
+                            "values" => {
+                                // values takes no arguments and returns object[] (array of values)
+                                if !args.is_empty() {
+                                    return Err(SemanticError::WrongNumberOfArguments {
+                                        expected: 0,
+                                        found: args.len(),
+                                    });
+                                }
+                                return Ok(Type::Array(Box::new(Type::Object)));
+                            }
+                            "has" => {
+                                // has takes one string argument and returns bool
+                                if args.len() != 1 {
+                                    return Err(SemanticError::WrongNumberOfArguments {
+                                        expected: 1,
+                                        found: args.len(),
+                                    });
+                                }
+                                let arg_type = self.check_expr(&args[0])?;
+                                if !self.types_compatible(&Type::String, &arg_type) {
+                                    return Err(SemanticError::TypeMismatch {
+                                        expected: Type::String,
+                                        found: arg_type,
+                                    });
+                                }
+                                return Ok(Type::Bool);
+                            }
+                            "remove" => {
+                                // remove takes one string argument and returns bool
+                                if args.len() != 1 {
+                                    return Err(SemanticError::WrongNumberOfArguments {
+                                        expected: 1,
+                                        found: args.len(),
+                                    });
+                                }
+                                let arg_type = self.check_expr(&args[0])?;
+                                if !self.types_compatible(&Type::String, &arg_type) {
+                                    return Err(SemanticError::TypeMismatch {
+                                        expected: Type::String,
+                                        found: arg_type,
+                                    });
+                                }
+                                return Ok(Type::Bool);
+                            }
+                            _ => {}
+                        }
                     }
                 }
 
@@ -924,16 +1033,36 @@ impl TypeChecker {
                 let obj_type = self.check_expr(object)?;
                 let idx_type = self.check_expr(index)?;
 
-                if !idx_type.is_integer() {
-                    return Err(SemanticError::TypeMismatch {
-                        expected: Type::Int64,
-                        found: idx_type,
-                    });
-                }
-
-                match obj_type {
-                    Type::Array(inner) => Ok(*inner),
+                match &obj_type {
+                    Type::Array(inner) => {
+                        // Array index must be integer
+                        if !idx_type.is_integer() {
+                            return Err(SemanticError::TypeMismatch {
+                                expected: Type::Int64,
+                                found: idx_type,
+                            });
+                        }
+                        Ok((**inner).clone())
+                    }
+                    Type::Generic { name, args } if name == "Map" && args.len() == 2 => {
+                        // Map index must be string (for now, we support string keys)
+                        if !self.types_compatible(&Type::String, &idx_type) {
+                            return Err(SemanticError::TypeMismatch {
+                                expected: Type::String,
+                                found: idx_type,
+                            });
+                        }
+                        // Return the value type (second type argument)
+                        Ok(args[1].clone())
+                    }
                     Type::Generic { name, args } if name == "List" && !args.is_empty() => {
+                        // List index must be integer
+                        if !idx_type.is_integer() {
+                            return Err(SemanticError::TypeMismatch {
+                                expected: Type::Int64,
+                                found: idx_type,
+                            });
+                        }
                         Ok(args[0].clone())
                     }
                     _ => Err(SemanticError::NotIndexable {
@@ -985,11 +1114,30 @@ impl TypeChecker {
             }
 
             ExprKind::Lambda { params, return_type, body } => {
+                // Try to infer parameter types from expected type
+                let expected_param_types = self.extract_expected_param_types();
+
                 self.scopes.enter_scope();
 
                 let mut param_types = Vec::new();
-                for param in params {
-                    let ty = param.type_annotation.clone().unwrap_or(Type::Void);
+                for (i, param) in params.iter().enumerate() {
+                    // Use explicit type annotation, or infer from expected type, or fallback to a placeholder
+                    let ty = if let Some(ty) = &param.type_annotation {
+                        ty.clone()
+                    } else if let Some(expected_types) = &expected_param_types {
+                        // Infer from expected function type
+                        if i < expected_types.len() {
+                            expected_types[i].clone()
+                        } else {
+                            // No matching expected type, use Object as placeholder for later inference
+                            Type::Object
+                        }
+                    } else {
+                        // No type annotation and no expected type - use Object
+                        // This allows the lambda to be used with any type
+                        Type::Object
+                    };
+
                     param_types.push(ty.clone());
 
                     let symbol = Symbol::variable(
@@ -1002,10 +1150,16 @@ impl TypeChecker {
                     self.scopes.define(&param.name, symbol);
                 }
 
+                // Save the current expected type and clear it for body checking
+                let saved_expected = self.expected_type.take();
+
                 match body {
                     LambdaBody::Expr(e) => {
                         let ret = self.check_expr(e)?;
                         self.scopes.exit_scope();
+
+                        // Restore expected type
+                        self.expected_type = saved_expected;
 
                         Ok(Type::Function {
                             params: param_types,
@@ -1017,6 +1171,9 @@ impl TypeChecker {
                             self.check_stmt(stmt)?;
                         }
                         self.scopes.exit_scope();
+
+                        // Restore expected type
+                        self.expected_type = saved_expected;
 
                         Ok(Type::Function {
                             params: param_types,
@@ -1085,17 +1242,26 @@ impl TypeChecker {
                         }
                     }
                     ExprKind::Index { object, index: _ } => {
-                        // Check if the array is mutable for index assignment
+                        // Check if the object is mutable for index assignment
                         if let ExprKind::Ident(name) = &object.kind {
                             let symbol = self.scopes.lookup(name).ok_or_else(|| {
                                 SemanticError::UndefinedVariable(name.clone())
                             })?;
 
                             if !symbol.is_object_mutable() {
-                                return Err(SemanticError::ImmutableArrayModification {
-                                    method: "index assignment".to_string(),
-                                    span: target.span,
-                                });
+                                // Check if it's a Map or Array for appropriate error message
+                                let obj_type = self.check_expr(object)?;
+                                if matches!(obj_type, Type::Generic { name, .. } if name == "Map") {
+                                    return Err(SemanticError::ImmutableMapModification {
+                                        method: "index assignment".to_string(),
+                                        span: target.span,
+                                    });
+                                } else {
+                                    return Err(SemanticError::ImmutableArrayModification {
+                                        method: "index assignment".to_string(),
+                                        span: target.span,
+                                    });
+                                }
                             }
                         }
                     }
@@ -1203,6 +1369,22 @@ impl TypeChecker {
             (Type::Generic { name: n1, args: a1 }, Type::Generic { name: n2, args: a2 }) => {
                 n1 == n2 && a1.len() == a2.len() && a1.iter().zip(a2).all(|(a, b)| self.types_compatible(a, b))
             }
+            // Function type compatibility: params and return type must be compatible
+            (
+                Type::Function { params: p1, return_type: r1 },
+                Type::Function { params: p2, return_type: r2 },
+            ) => {
+                // Must have same number of parameters
+                if p1.len() != p2.len() {
+                    return false;
+                }
+                // All parameter types must be compatible (contravariant - but for simplicity we use equality)
+                if !p1.iter().zip(p2.iter()).all(|(a, b)| self.types_compatible(a, b)) {
+                    return false;
+                }
+                // Return types must be compatible
+                self.types_compatible(r1, r2)
+            }
             _ => false,
         }
     }
@@ -1272,6 +1454,15 @@ impl TypeChecker {
         }
 
         Ok(types)
+    }
+
+    /// Extract expected parameter types from the current expected_type.
+    /// Used for Lambda parameter type inference when the expected type is a function type.
+    fn extract_expected_param_types(&self) -> Option<Vec<Type>> {
+        match &self.expected_type {
+            Some(Type::Function { params, .. }) => Some(params.clone()),
+            _ => None,
+        }
     }
 
     /// Get the target type for a type conversion function name.
@@ -1504,4 +1695,134 @@ mod tests {
     }
 
     // 注: ?? 和 !! 操作符的测试将在 Task 6.2 中添加
+
+    // ============ Lambda Tests ============
+
+    #[test]
+    fn test_lambda_basic() {
+        // Basic lambda with expression body
+        let result = check_program("let f = (x: int64, y: int64) -> x + y");
+        assert!(result.is_ok(), "basic lambda should be valid");
+    }
+
+    #[test]
+    fn test_lambda_with_return_type() {
+        // Lambda with explicit return type: (params) ReturnType -> body
+        let result = check_program("let f = (x: int64) int64 -> x * 2");
+        assert!(result.is_ok(), "lambda with explicit return type should be valid");
+    }
+
+    #[test]
+    fn test_lambda_no_params() {
+        // Lambda with no parameters
+        let result = check_program("let f = () -> 42");
+        assert!(result.is_ok(), "lambda with no params should be valid");
+    }
+
+    #[test]
+    fn test_lambda_block_body() {
+        // Lambda with block body
+        let result = check_program(
+            r#"
+            let f = (x: int64) -> {
+                let y = x * 2
+                return y
+            }
+        "#,
+        );
+        assert!(result.is_ok(), "lambda with block body should be valid");
+    }
+
+    #[test]
+    fn test_lambda_type() {
+        // Lambda type inference - function type without -> for return type
+        let result = check_program("let f: func(int64, int64) int64 = (a: int64, b: int64) -> a + b");
+        assert!(result.is_ok(), "lambda type should match function type");
+    }
+
+    #[test]
+    fn test_lambda_type_inference_from_param() {
+        // Lambda parameter type inference from function parameter type
+        let result = check_program(
+            r#"
+            func apply(f: func(int64) int64) {
+                let x = f(10)
+            }
+            apply((x) -> x * 2)
+        "#,
+        );
+        assert!(result.is_ok(), "lambda param type should be inferred from function param");
+    }
+
+    #[test]
+    fn test_lambda_as_function_arg() {
+        // Lambda passed as function argument
+        let result = check_program(
+            r#"
+            func apply(arr: int64[], f: func(int64) int64) {
+                for (var i = 0; i < arr.len(); i = i + 1) {
+                    let x = f(arr[i])
+                }
+            }
+            apply([1, 2, 3], (x: int64) -> x * 2)
+        "#,
+        );
+        assert!(result.is_ok(), "lambda as function arg should be valid");
+    }
+
+    #[test]
+    fn test_lambda_capture_outer_variable() {
+        // Lambda captures outer variable
+        let result = check_program(
+            r#"
+            let multiplier = 10
+            let multiply = (x: int64) -> x * multiplier
+        "#,
+        );
+        assert!(result.is_ok(), "lambda should capture outer variable");
+    }
+
+    #[test]
+    fn test_lambda_nested() {
+        // Nested lambdas
+        let result = check_program(
+            r#"
+            let outer = (x: int64) -> (y: int64) -> x + y
+        "#,
+        );
+        assert!(result.is_ok(), "nested lambdas should be valid");
+    }
+
+    #[test]
+    fn test_lambda_type_mismatch() {
+        // Lambda type mismatch
+        let result = check_program("let f: func(int64) -> int64 = (x: string) -> 42");
+        assert!(result.is_err(), "lambda type mismatch should be error");
+    }
+
+    #[test]
+    fn test_lambda_wrong_param_count() {
+        // Lambda with wrong parameter count for expected type
+        let result = check_program(
+            r#"
+            func apply(f: func(int64) int64) {}
+            apply((x: int64, y: int64) -> x + y)
+        "#,
+        );
+        assert!(result.is_err(), "wrong lambda param count should be error");
+    }
+
+    #[test]
+    fn test_function_type_compatibility() {
+        // Function type compatibility
+        let result = check_program(
+            r#"
+            func apply(f: func(int64) int64) int64 {
+                return f(10)
+            }
+            let result = apply((x: int64) -> x * 2)
+        "#,
+        );
+        assert!(result.is_ok(), "function type compatibility should work");
+    }
 }

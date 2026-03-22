@@ -374,6 +374,19 @@ impl IRBuilder {
         }
     }
 
+    /// Get the type of an expression with context (uses variable_types for identifiers)
+    fn get_expr_type_with_context(&self, expr: &Expr) -> Option<Type> {
+        match &expr.kind {
+            ExprKind::Ident(name) => self.variable_types.get(name).cloned(),
+            ExprKind::MapLiteral(_) => Some(Type::Generic {
+                name: "Map".to_string(),
+                args: vec![Type::String, Type::Object],
+            }),
+            ExprKind::ArrayLiteral(_) => Some(Type::Array(Box::new(Type::Object))),
+            _ => None,
+        }
+    }
+
     fn build_expr(&mut self, expr: &Expr) -> Option<Value> {
         match &expr.kind {
             ExprKind::IntLiteral(n) => {
@@ -620,6 +633,62 @@ impl IRBuilder {
                         });
                         Some(result)
                     }
+                    // Map methods
+                    "keys" => {
+                        let obj_val = self.build_expr(object)?;
+                        let result = self.new_temp();
+                        self.emit(Instruction::MapKeys {
+                            result: result.clone(),
+                            map: obj_val,
+                        });
+                        Some(result)
+                    }
+                    "values" => {
+                        let obj_val = self.build_expr(object)?;
+                        let result = self.new_temp();
+                        self.emit(Instruction::MapValues {
+                            result: result.clone(),
+                            map: obj_val,
+                        });
+                        Some(result)
+                    }
+                    "has" => {
+                        if args.is_empty() {
+                            return None;
+                        }
+                        let obj_val = self.build_expr(object)?;
+                        let key_val = self.build_expr(&args[0])?;
+                        let result = self.new_temp();
+                        self.emit(Instruction::MapHas {
+                            result: result.clone(),
+                            map: obj_val,
+                            key: key_val,
+                        });
+                        Some(result)
+                    }
+                    "remove" => {
+                        if args.is_empty() {
+                            return None;
+                        }
+                        let obj_val = self.build_expr(object)?;
+                        let key_val = self.build_expr(&args[0])?;
+                        let result = self.new_temp();
+                        self.emit(Instruction::MapRemove {
+                            result: result.clone(),
+                            map: obj_val,
+                            key: key_val,
+                        });
+                        Some(result)
+                    }
+                    "map_len" => {
+                        let obj_val = self.build_expr(object)?;
+                        let result = self.new_temp();
+                        self.emit(Instruction::MapLen {
+                            result: result.clone(),
+                            map: obj_val,
+                        });
+                        Some(result)
+                    }
                     _ => {
                         // Other method calls: treat as function call with self parameter
                         let obj_val = self.build_expr(object)?;
@@ -650,11 +719,29 @@ impl IRBuilder {
                     ExprKind::Index { object, index } => {
                         let obj_val = self.build_expr(object)?;
                         let idx_val = self.build_expr(index)?;
-                        self.emit(Instruction::ArraySet {
-                            array: obj_val,
-                            index: idx_val,
-                            value: val.clone(),
-                        });
+
+                        // Check if this is a Map or Array index
+                        let obj_type = self.get_expr_type_with_context(object);
+                        let is_map = matches!(
+                            obj_type,
+                            Some(Type::Generic { name, .. }) if name == "Map"
+                        );
+
+                        if is_map {
+                            // Map index assignment: use MapSet
+                            self.emit(Instruction::MapSet {
+                                map: obj_val,
+                                key: idx_val,
+                                value: val.clone(),
+                            });
+                        } else {
+                            // Array index assignment: use ArraySet
+                            self.emit(Instruction::ArraySet {
+                                array: obj_val,
+                                index: idx_val,
+                                value: val.clone(),
+                            });
+                        }
                     }
                     _ => {}
                 }
@@ -734,11 +821,28 @@ impl IRBuilder {
                 let idx_val = self.build_expr(index)?;
                 let result = self.new_temp();
 
-                self.emit(Instruction::ArrayGet {
-                    result: result.clone(),
-                    array: obj_val,
-                    index: idx_val,
-                });
+                // Check if this is a Map or Array index
+                let obj_type = self.get_expr_type_with_context(object);
+                let is_map = matches!(
+                    obj_type,
+                    Some(Type::Generic { name, .. }) if name == "Map"
+                );
+
+                if is_map {
+                    // Map index access: use MapGet
+                    self.emit(Instruction::MapGet {
+                        result: result.clone(),
+                        map: obj_val,
+                        key: idx_val,
+                    });
+                } else {
+                    // Array index access: use ArrayGet
+                    self.emit(Instruction::ArrayGet {
+                        result: result.clone(),
+                        array: obj_val,
+                        index: idx_val,
+                    });
+                }
 
                 Some(result)
             }
@@ -875,10 +979,27 @@ impl IRBuilder {
                 // For now, return null (simplified - needs proper struct allocation)
                 None
             }
-            ExprKind::MapLiteral(_) => {
-                // Map literal
-                // For now, return null (simplified - needs map runtime)
-                None
+            ExprKind::MapLiteral(entries) => {
+                // Map literal: { "a": 1, "b": 2 }
+                let result = self.new_temp();
+
+                // Create map
+                self.emit(Instruction::MapNew {
+                    result: result.clone(),
+                });
+
+                // Fill entries
+                for (key, value) in entries {
+                    let key_val = self.build_expr(key)?;
+                    let val = self.build_expr(value)?;
+                    self.emit(Instruction::MapSet {
+                        map: result.clone(),
+                        key: key_val,
+                        value: val,
+                    });
+                }
+
+                Some(result)
             }
             ExprKind::Lambda { params, return_type, body } => {
                 // Lambda expression - create a separate function and return a reference to it
@@ -1546,6 +1667,29 @@ impl IRBuilder {
                     }
                 }
                 Type::Int64
+            }
+            ExprKind::ArrayLiteral(elements) => {
+                if elements.is_empty() {
+                    Type::Array(Box::new(Type::Object))
+                } else {
+                    let elem_type = self.infer_ast_type(&elements[0]);
+                    Type::Array(Box::new(elem_type))
+                }
+            }
+            ExprKind::MapLiteral(entries) => {
+                if entries.is_empty() {
+                    Type::Generic {
+                        name: "Map".to_string(),
+                        args: vec![Type::String, Type::Object],
+                    }
+                } else {
+                    let key_type = self.infer_ast_type(&entries[0].0);
+                    let value_type = self.infer_ast_type(&entries[0].1);
+                    Type::Generic {
+                        name: "Map".to_string(),
+                        args: vec![key_type, value_type],
+                    }
+                }
             }
             _ => Type::Int64,
         }
