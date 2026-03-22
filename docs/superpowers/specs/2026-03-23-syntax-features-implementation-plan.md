@@ -190,6 +190,62 @@ if (condition) { then_body } else { else_body }
     continue...
 ```
 
+#### for 循环基本块结构
+
+**C 风格 for 循环：**
+
+```
+for (init; condition; update) { body }
+
+→ init_block:
+    execute init
+    br condition_block
+
+→ condition_block:
+    compute condition
+    br_if condition, body_block, exit_block
+
+→ body_block:
+    execute body
+    br update_block
+
+→ update_block:
+    execute update
+    br condition_block
+
+→ exit_block:
+    continue...
+```
+
+**while 风格 for 循环：**
+
+```
+for (condition) { body }
+
+→ condition_block:
+    compute condition
+    br_if condition, body_block, exit_block
+
+→ body_block:
+    execute body
+    br condition_block
+
+→ exit_block:
+    continue...
+```
+
+**无限循环：**
+
+```
+for { body }
+
+→ body_block:
+    execute body
+    br body_block
+
+// 通过 break 跳出
+```
+
 ### 2.3 影响范围
 
 - `crates/xin-codegen/src/cranelift.rs` — 主要修改
@@ -413,8 +469,7 @@ let z = (x ?? 0) + 1       // 正确：使用 ?? 解包后运算
 ```xin
 let a: int32? = 10
 let b: int32? = null
-a == b                      // 编译错误：可空类型不能直接比较
-a ?? 0 == b ?? 0            // 正确：解包后比较
+(a ?? 0) == (b ?? 0)        // 正确：解包后比较
 ```
 
 ### 6.7 不实现的特性
