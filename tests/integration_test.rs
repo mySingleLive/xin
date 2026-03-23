@@ -865,3 +865,20 @@ fn e2e_functions_recursion() {
 fn e2e_functions_return_test() {
     run_e2e_test("functions", "return_test");
 }
+
+// ==================== Arrays E2E Tests ====================
+
+#[test]
+fn e2e_arrays_basic() {
+    run_e2e_test("arrays", "basic");
+}
+
+#[test]
+fn e2e_arrays_mutable() {
+    run_e2e_test("arrays", "mutable");
+}
+
+#[test]
+fn e2e_arrays_nested() {
+    run_e2e_test("arrays", "nested");
+}
