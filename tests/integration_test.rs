@@ -826,3 +826,25 @@ fn e2e_templates_expressions() {
 fn e2e_templates_escape() {
     run_e2e_test("templates", "escape");
 }
+
+// ==================== Control Flow E2E Tests ====================
+
+#[test]
+fn e2e_control_flow_break_continue() {
+    run_e2e_test("control_flow", "break_continue");
+}
+
+#[test]
+fn e2e_control_flow_for_loops() {
+    run_e2e_test("control_flow", "for_loops");
+}
+
+#[test]
+fn e2e_control_flow_if_else() {
+    run_e2e_test("control_flow", "if_else");
+}
+
+#[test]
+fn e2e_control_flow_if_else_branching() {
+    run_e2e_test("control_flow", "if_else_branching");
+}
