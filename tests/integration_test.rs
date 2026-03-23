@@ -901,3 +901,10 @@ fn e2e_maps_basic() {
 fn e2e_maps_methods() {
     run_e2e_test("maps", "methods");
 }
+
+// ==================== Floats E2E Tests ====================
+
+#[test]
+fn e2e_floats_arithmetic() {
+    run_e2e_test("floats", "arithmetic");
+}

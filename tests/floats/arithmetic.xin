@@ -1,0 +1,10 @@
+// Test float literals and printing
+
+func main() {
+    // Float literals
+    let a = 3.14
+    println(a)
+
+    let b = 2.5
+    println(b)
+}
