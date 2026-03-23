@@ -1,0 +1,19 @@
+// Simple Map syntax test - Parser only
+
+func main() {
+    // Empty map
+    let empty = {}
+
+    // Map with string literal keys
+    let person = {"name": "Alice", "age": 30}
+
+    // Map with variable keys
+    let key = "address"
+    let address = {key: "123 Main St"}
+
+    // Map index access
+    let name = person["name"]
+
+    // Map dot access with string
+    let age = person."age"
+}

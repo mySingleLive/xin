@@ -1,0 +1,37 @@
+// Test Map syntax
+
+func main() {
+    // Empty map
+    let empty = {}
+    print("Empty map created")
+
+    // Map with string literal keys
+    let person = {"name": "Alice", "age": 30}
+    print("Person map created")
+
+    // Map with variable keys
+    let key = "address"
+    let address = {key: "123 Main St"}
+    print("Address map created")
+
+    // Map with expression keys
+    let m = {getKey(): "value"}
+    print("Map with expression key created")
+
+    // Map index access
+    let name = person["name"]
+    print("Name accessed")
+
+    // Map dot access with string
+    let age = person."age"
+    print("Age accessed via dot")
+
+    // Map dot access with template string
+    let prefix = "na"
+    let name2 = person.`{prefix}me`
+    print("Name accessed via template")
+}
+
+func getKey() string {
+    return "dynamic_key"
+}
