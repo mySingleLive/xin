@@ -131,6 +131,32 @@ char* xin_bool_to_str(int8_t b) {
     return buf;
 }
 
+// Convert map value to string
+// This handles both integer values and string pointers
+// Uses a heuristic: small values (< 65536) are likely integers,
+// larger values that look like valid pointers are treated as strings
+char* xin_map_value_to_str(int64_t val) {
+    // Small values are likely integers (common for counters, ages, etc.)
+    // This threshold is arbitrary but covers most common integer use cases
+    if (val >= -1000000 && val <= 1000000) {
+        return xin_int_to_str(val);
+    }
+
+    // Try to treat as a string pointer
+    // Check if the pointer looks valid (non-null and in a reasonable range)
+    char* str = (char*)val;
+    if (str != NULL) {
+        // Simple validity check: first character should be printable or null
+        if (*str == '\0' || (*str >= 32 && *str <= 126)) {
+            // Looks like a valid string, duplicate it
+            return strdup(str);
+        }
+    }
+
+    // Fall back to integer representation
+    return xin_int_to_str(val);
+}
+
 // Printf implementation with %b support for boolean
 void xin_printf(const char* format, ...) {
     va_list args;
@@ -335,7 +361,7 @@ int64_t xin_array_len(xin_array* arr) {
 // Map 条目结构
 typedef struct xin_map_entry {
     char* key;                  // 键（字符串）
-    void* value;                // 值（通用指针）
+    int64_t value;              // 值（int64_t 可以存储整数和指针）
     struct xin_map_entry* next; // 链表下一个节点（用于哈希冲突）
 } xin_map_entry;
 
@@ -374,8 +400,8 @@ xin_map* xin_map_new() {
     return map;
 }
 
-// 设置键值对
-void xin_map_set(xin_map* map, const char* key, void* value) {
+// 设置键值对（整数类型）
+void xin_map_set_int(xin_map* map, const char* key, int64_t value) {
     uint64_t hash = map_hash(key);
     int64_t index = hash % map->bucket_count;
 
@@ -411,8 +437,14 @@ void xin_map_set(xin_map* map, const char* key, void* value) {
     map->size++;
 }
 
-// 获取值
-void* xin_map_get(xin_map* map, const char* key) {
+// 设置键值对（指针类型）
+void xin_map_set(xin_map* map, const char* key, void* value) {
+    // 将指针转换为 int64_t 存储
+    xin_map_set_int(map, key, (int64_t)value);
+}
+
+// 获取值（整数类型）
+int64_t xin_map_get_int(xin_map* map, const char* key) {
     uint64_t hash = map_hash(key);
     int64_t index = hash % map->bucket_count;
 
@@ -424,7 +456,38 @@ void* xin_map_get(xin_map* map, const char* key) {
         entry = entry->next;
     }
 
-    return NULL;  // 键不存在
+    return 0;  // 键不存在，返回 0
+}
+
+// 获取值（指针类型）
+void* xin_map_get(xin_map* map, const char* key) {
+    // 从 int64_t 转换回指针
+    return (void*)xin_map_get_int(map, key);
+}
+
+// 设置键值对（浮点数类型）- 使用位转换避免精度损失
+void xin_map_set_float(xin_map* map, const char* key, double value) {
+    int64_t bits;
+    memcpy(&bits, &value, sizeof(double));
+    xin_map_set_int(map, key, bits);
+}
+
+// 获取值（浮点数类型）- 使用位转换恢复浮点数
+double xin_map_get_float(xin_map* map, const char* key) {
+    int64_t bits = xin_map_get_int(map, key);
+    double value;
+    memcpy(&value, &bits, sizeof(double));
+    return value;
+}
+
+// 设置键值对（布尔类型）
+void xin_map_set_bool(xin_map* map, const char* key, int8_t value) {
+    xin_map_set_int(map, key, (int64_t)value);
+}
+
+// 获取值（布尔类型）
+int8_t xin_map_get_bool(xin_map* map, const char* key) {
+    return (int8_t)xin_map_get_int(map, key);
 }
 
 // 获取键值对数量
@@ -507,7 +570,7 @@ xin_array* xin_map_values(xin_map* map) {
     for (int64_t i = 0; i < map->bucket_count; i++) {
         xin_map_entry* entry = map->buckets[i];
         while (entry) {
-            xin_array_push(values, entry->value);
+            xin_array_push(values, (void*)entry->value);
             entry = entry->next;
         }
     }

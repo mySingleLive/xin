@@ -1,0 +1,22 @@
+// Test Map methods - remove, keys, values
+
+func main() {
+    // Create a map
+    var m = { "a": 1, "b": 2, "c": 3 }
+
+    // Test map_len
+    let size1 = m.map_len()
+    println(size1)
+
+    // Test remove
+    let removed = m.remove("b")
+    println(removed)
+
+    let size2 = m.map_len()
+    println(size2)
+
+    // Test empty map
+    let empty = {}
+    let empty_size = empty.map_len()
+    println(empty_size)
+}

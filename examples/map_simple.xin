@@ -6,6 +6,7 @@ func main() {
 
     // Map with string literal keys
     let person = {"name": "Alice", "age": 30}
+    println(`Person name: {person['name']}, age: {person['age']}`)
 
     // Map with variable keys
     let key = "address"

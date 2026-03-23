@@ -1,6 +1,6 @@
 #!/bin/bash
 # Xin E2E Test Runner
-# Usage: ./run_tests.sh [directory] [--all] [-v|--verbose] [-h|--help]
+# Usage: ./run_tests.sh [directory] [-v|--verbose] [-h|--help]
 
 set -e
 
@@ -14,16 +14,14 @@ RESET='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 XIN_COMPILER="cargo run --"
-PHASE1_DIRS=("basic" "strings" "operators" "templates")
-PHASE2_DIRS=("control_flow" "functions" "arrays")
+TEST_DIRS=("basic" "strings" "operators" "templates" "control_flow" "functions" "arrays" "nullable" "maps" "floats")
 VERBOSE=false
-RUN_ALL=false
 TARGET_DIR=""
 
 # Verbose output helper
 verbose_log() {
     if [ "$VERBOSE" = true ]; then
-        echo -e "${CYAN}[VERBOSE] $1${RESET}"
+        printf "${CYAN}[VERBOSE] %s${RESET}\n" "$1"
     fi
 }
 
@@ -34,22 +32,16 @@ show_help() {
     echo "Usage: ./run_tests.sh [options] [directory]"
     echo ""
     echo "Options:"
-    echo "  --all        Run all tests including phase 2 (control_flow, functions)"
     echo "  -v, --verbose  Show detailed output"
-    echo "  -h, --help   Show this help message"
+    echo "  -h, --help     Show this help message"
     echo ""
-    echo "Phase 1 directories: ${PHASE1_DIRS[*]}"
-    echo "Phase 2 directories: ${PHASE2_DIRS[*]} (require --all)"
+    echo "Test directories: ${TEST_DIRS[*]}"
     exit 0
 }
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --all)
-            RUN_ALL=true
-            shift
-            ;;
         -v|--verbose)
             VERBOSE=true
             shift
@@ -67,10 +59,8 @@ done
 # Determine which directories to test
 if [ -n "$TARGET_DIR" ]; then
     DIRS=("$TARGET_DIR")
-elif [ "$RUN_ALL" = true ]; then
-    DIRS=("${PHASE1_DIRS[@]}" "${PHASE2_DIRS[@]}")
 else
-    DIRS=("${PHASE1_DIRS[@]}")
+    DIRS=("${TEST_DIRS[@]}")
 fi
 
 # Test counters
@@ -78,7 +68,7 @@ PASSED=0
 FAILED=0
 
 # Print header
-echo -e "${CYAN}[Xin E2E Tests]${RESET}"
+printf "${CYAN}[Xin E2E Tests]${RESET}\n"
 echo ""
 
 # Run tests
@@ -86,7 +76,7 @@ for dir in "${DIRS[@]}"; do
     test_dir="$SCRIPT_DIR/$dir"
 
     if [ ! -d "$test_dir" ]; then
-        echo -e "${RED}Directory not found: $test_dir${RESET}"
+        printf "${RED}Directory not found: $test_dir${RESET}\n"
         continue
     fi
 
@@ -102,7 +92,7 @@ for dir in "${DIRS[@]}"; do
 
         # Check if expected file exists
         if [ ! -f "$expected_file" ]; then
-            echo -e "Running $dir/$test_name... ${RED}✗ MISSING EXPECTED FILE${RESET}"
+            printf "Running $dir/$test_name... ${RED}✗ MISSING EXPECTED FILE${RESET}\n"
             ((FAILED++))
             continue
         fi
@@ -112,7 +102,7 @@ for dir in "${DIRS[@]}"; do
         # Compile the xin file
         output_binary="/tmp/xin_test_${test_name}"
         compile_output=$(cd "$PROJECT_ROOT" && cargo run -- compile "$xin_file" -o "$output_binary" 2>&1) || {
-            echo -e "Running $dir/$test_name... ${RED}✗ COMPILE FAILED${RESET}"
+            printf "Running $dir/$test_name... ${RED}✗ COMPILE FAILED${RESET}\n"
             verbose_log "$compile_output"
             ((FAILED++))
             continue
@@ -122,7 +112,7 @@ for dir in "${DIRS[@]}"; do
 
         # Run the binary and capture output
         actual_output=$("$output_binary" 2>&1) || {
-            echo -e "Running $dir/$test_name... ${RED}✗ RUNTIME ERROR${RESET}"
+            printf "Running $dir/$test_name... ${RED}✗ RUNTIME ERROR${RESET}\n"
             verbose_log "$actual_output"
             ((FAILED++))
             continue
@@ -136,10 +126,10 @@ for dir in "${DIRS[@]}"; do
         expected_stripped=$(echo "$expected_output" | sed 's/[[:space:]]*$//')
 
         if [ "$actual_stripped" = "$expected_stripped" ]; then
-            echo -e "Running $dir/$test_name... ${GREEN}✓${RESET}"
+            printf "Running $dir/$test_name... ${GREEN}✓${RESET}\n"
             ((PASSED++))
         else
-            echo -e "Running $dir/$test_name... ${RED}✗ FAILED${RESET}"
+            printf "Running $dir/$test_name... ${RED}✗ FAILED${RESET}\n"
             echo ""
             echo "--- Expected ---"
             echo "$expected_output"
@@ -162,7 +152,7 @@ done
 # Print summary
 echo ""
 if [ $FAILED -eq 0 ]; then
-    echo -e "${GREEN}All tests passed! ($PASSED/$PASSED)${RESET}"
+    printf "${GREEN}All tests passed! ($PASSED/$PASSED)${RESET}\n"
 else
     echo "Summary: $PASSED passed, $FAILED failed"
 fi

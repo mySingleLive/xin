@@ -378,11 +378,18 @@ impl IRBuilder {
     fn get_expr_type_with_context(&self, expr: &Expr) -> Option<Type> {
         match &expr.kind {
             ExprKind::Ident(name) => self.variable_types.get(name).cloned(),
+            // Map values are heterogeneous, so value type is always Object
             ExprKind::MapLiteral(_) => Some(Type::Generic {
                 name: "Map".to_string(),
                 args: vec![Type::String, Type::Object],
             }),
             ExprKind::ArrayLiteral(_) => Some(Type::Array(Box::new(Type::Object))),
+            // Basic literal types
+            ExprKind::IntLiteral(_) => Some(Type::Int64),
+            ExprKind::FloatLiteral(_) => Some(Type::Float64),
+            ExprKind::BoolLiteral(_) => Some(Type::Bool),
+            ExprKind::StringLiteral(_) => Some(Type::String),
+            ExprKind::Null => Some(Type::Object), // null can be any nullable type
             _ => None,
         }
     }
@@ -729,10 +736,15 @@ impl IRBuilder {
 
                         if is_map {
                             // Map index assignment: use MapSet
+                            // Get the value type from the assigned expression
+                            let value_type = self.get_expr_type_with_context(value)
+                                .map(|t| self.convert_type(&t))
+                                .unwrap_or(IRType::I64);
                             self.emit(Instruction::MapSet {
                                 map: obj_val,
                                 key: idx_val,
                                 value: val.clone(),
+                                value_type,
                             });
                         } else {
                             // Array index assignment: use ArraySet
@@ -825,15 +837,25 @@ impl IRBuilder {
                 let obj_type = self.get_expr_type_with_context(object);
                 let is_map = matches!(
                     obj_type,
-                    Some(Type::Generic { name, .. }) if name == "Map"
+                    Some(Type::Generic { ref name, .. }) if name == "Map"
                 );
 
                 if is_map {
                     // Map index access: use MapGet
+                    // Get the value type from Map<K, V> -> V
+                    let value_type = match &obj_type {
+                        Some(Type::Generic { args, .. }) => {
+                            args.get(1)
+                                .map(|t| self.convert_type(t))
+                                .unwrap_or(IRType::I64)
+                        }
+                        _ => IRType::I64,
+                    };
                     self.emit(Instruction::MapGet {
                         result: result.clone(),
                         map: obj_val,
                         key: idx_val,
+                        value_type,
                     });
                 } else {
                     // Array index access: use ArrayGet
@@ -992,10 +1014,15 @@ impl IRBuilder {
                 for (key, value) in entries {
                     let key_val = self.build_expr(key)?;
                     let val = self.build_expr(value)?;
+                    // Get value type from the value expression
+                    let value_type = self.get_expr_type_with_context(value)
+                        .map(|t| self.convert_type(&t))
+                        .unwrap_or(IRType::I64);
                     self.emit(Instruction::MapSet {
                         map: result.clone(),
                         key: key_val,
                         value: val,
+                        value_type,
                     });
                 }
 
@@ -1677,18 +1704,16 @@ impl IRBuilder {
                 }
             }
             ExprKind::MapLiteral(entries) => {
-                if entries.is_empty() {
-                    Type::Generic {
-                        name: "Map".to_string(),
-                        args: vec![Type::String, Type::Object],
-                    }
+                // Map values can be heterogeneous, so always use Object type
+                // This allows different keys to have different value types
+                let key_type = if entries.is_empty() {
+                    Type::String
                 } else {
-                    let key_type = self.infer_ast_type(&entries[0].0);
-                    let value_type = self.infer_ast_type(&entries[0].1);
-                    Type::Generic {
-                        name: "Map".to_string(),
-                        args: vec![key_type, value_type],
-                    }
+                    self.infer_ast_type(&entries[0].0)
+                };
+                Type::Generic {
+                    name: "Map".to_string(),
+                    args: vec![key_type, Type::Object],
                 }
             }
             _ => Type::Int64,
@@ -1761,6 +1786,22 @@ impl IRBuilder {
                     return Some(*return_type);
                 }
                 None
+            }
+            ExprKind::Index { object, index: _ } => {
+                // For map index, return the value type from the map's generic args
+                // For array index, return the element type
+                let obj_type = self.get_expr_type_with_vars(object);
+                match obj_type {
+                    Some(Type::Generic { name, args }) if name == "Map" => {
+                        // Map<K, V> index returns V
+                        args.get(1).cloned().or(Some(Type::Object))
+                    }
+                    Some(Type::Array(elem_type)) => {
+                        // Array<T> index returns T
+                        Some(*elem_type)
+                    }
+                    _ => Some(Type::Int64),
+                }
             }
             _ => None,
         }
@@ -1909,6 +1950,24 @@ impl IRBuilder {
                 self.declare_extern_if_needed(
                     "xin_bool_to_str",
                     vec![IRType::Bool],
+                    Some(IRType::Ptr("char".to_string())),
+                );
+                result
+            }
+            // Object type: use a special runtime function that handles both cases
+            // xin_map_value_to_str checks if the value looks like a valid pointer
+            Some(Type::Object) => {
+                let result = self.new_temp();
+                // Directly call xin_map_value_to_str instead of using ToString instruction
+                self.emit(Instruction::Call {
+                    result: Some(result.clone()),
+                    func: "xin_map_value_to_str".to_string(),
+                    args: vec![value],
+                    is_extern: true,
+                });
+                self.declare_extern_if_needed(
+                    "xin_map_value_to_str",
+                    vec![IRType::I64],
                     Some(IRType::Ptr("char".to_string())),
                 );
                 result

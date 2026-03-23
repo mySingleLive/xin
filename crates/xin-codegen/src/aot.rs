@@ -182,6 +182,72 @@ impl AOTCodeGenerator {
         self.extern_func_ids.insert("xin_map_get".to_string(), func_id);
         self.func_sigs.insert("xin_map_get".to_string(), sig);
 
+        // xin_map_set_int(xin_map* map, const char* key, int64_t value) -> void
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(types::I64));
+        let func_id = self.module
+            .declare_function("xin_map_set_int", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_map_set_int: {}", e))?;
+        self.extern_func_ids.insert("xin_map_set_int".to_string(), func_id);
+        self.func_sigs.insert("xin_map_set_int".to_string(), sig);
+
+        // xin_map_get_int(xin_map* map, const char* key) -> int64_t
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.returns.push(AbiParam::new(types::I64));
+        let func_id = self.module
+            .declare_function("xin_map_get_int", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_map_get_int: {}", e))?;
+        self.extern_func_ids.insert("xin_map_get_int".to_string(), func_id);
+        self.func_sigs.insert("xin_map_get_int".to_string(), sig);
+
+        // xin_map_set_float(xin_map* map, const char* key, double value) -> void
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(types::F64));
+        let func_id = self.module
+            .declare_function("xin_map_set_float", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_map_set_float: {}", e))?;
+        self.extern_func_ids.insert("xin_map_set_float".to_string(), func_id);
+        self.func_sigs.insert("xin_map_set_float".to_string(), sig);
+
+        // xin_map_get_float(xin_map* map, const char* key) -> double
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.returns.push(AbiParam::new(types::F64));
+        let func_id = self.module
+            .declare_function("xin_map_get_float", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_map_get_float: {}", e))?;
+        self.extern_func_ids.insert("xin_map_get_float".to_string(), func_id);
+        self.func_sigs.insert("xin_map_get_float".to_string(), sig);
+
+        // xin_map_set_bool(xin_map* map, const char* key, int8_t value) -> void
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(types::I8));
+        let func_id = self.module
+            .declare_function("xin_map_set_bool", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_map_set_bool: {}", e))?;
+        self.extern_func_ids.insert("xin_map_set_bool".to_string(), func_id);
+        self.func_sigs.insert("xin_map_set_bool".to_string(), sig);
+
+        // xin_map_get_bool(xin_map* map, const char* key) -> int8_t
+        let mut sig = self.module.make_signature();
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.params.push(AbiParam::new(self.pointer_type));
+        sig.returns.push(AbiParam::new(types::I8));
+        let func_id = self.module
+            .declare_function("xin_map_get_bool", Linkage::Import, &sig)
+            .map_err(|e| format!("Failed to declare xin_map_get_bool: {}", e))?;
+        self.extern_func_ids.insert("xin_map_get_bool".to_string(), func_id);
+        self.func_sigs.insert("xin_map_get_bool".to_string(), sig);
+
         // xin_map_len(xin_map* map) -> int64_t
         let mut sig = self.module.make_signature();
         sig.params.push(AbiParam::new(self.pointer_type));
@@ -1039,34 +1105,63 @@ impl AOTCodeGenerator {
                 let map_ptr = builder.inst_results(call_val)[0];
                 self.store_variable(builder, result, map_ptr, variables, var_counter, self.pointer_type);
             }
-            Instruction::MapSet { map, key, value } => {
-                // Call xin_map_set(map, key, value) -> void
+            Instruction::MapSet { map, key, value, value_type } => {
+                // Call the appropriate map_set function based on value type
                 let map_val = self.load_variable(builder, map, variables)?;
                 let key_val = self.load_variable(builder, key, variables)?;
                 let val = self.load_variable(builder, value, variables)?;
 
+                // Choose the appropriate function based on value type
+                // Note: Object type uses xin_map_set_int to match MapGet behavior
+                let func_name = match value_type {
+                    IRType::F32 | IRType::F64 => "xin_map_set_float",
+                    IRType::Bool => "xin_map_set_bool",
+                    IRType::I64 | IRType::I32 | IRType::I16 | IRType::I8 |
+                    IRType::U64 | IRType::U32 | IRType::U16 | IRType::U8 |
+                    IRType::I128 | IRType::U128 | IRType::Object => "xin_map_set_int",
+                    _ => "xin_map_set",  // Use pointer version for strings only
+                };
+
                 let func_ref = self.get_or_create_func_ref(
                     builder,
-                    "xin_map_set",
+                    func_name,
                     func_ref_cache,
                 )?;
 
                 builder.ins().call(func_ref, &[map_val, key_val, val]);
             }
-            Instruction::MapGet { result, map, key } => {
-                // Call xin_map_get(map, key) -> void*
+            Instruction::MapGet { result, map, key, value_type } => {
+                // Call the appropriate map_get function based on value type
                 let map_val = self.load_variable(builder, map, variables)?;
                 let key_val = self.load_variable(builder, key, variables)?;
 
+                // Choose the appropriate function based on value type
+                // Note: Object type uses xin_map_get_int because all values are stored as int64_t
+                let (func_name, result_type) = match value_type {
+                    IRType::F32 | IRType::F64 => ("xin_map_get_float", types::F64),
+                    IRType::Bool => ("xin_map_get_bool", types::I8),
+                    IRType::I64 | IRType::I32 | IRType::I16 | IRType::I8 |
+                    IRType::U64 | IRType::U32 | IRType::U16 | IRType::U8 |
+                    IRType::I128 | IRType::U128 | IRType::Object => ("xin_map_get_int", types::I64),
+                    _ => ("xin_map_get", self.pointer_type),  // Use pointer version for strings
+                };
+
                 let func_ref = self.get_or_create_func_ref(
                     builder,
-                    "xin_map_get",
+                    func_name,
                     func_ref_cache,
                 )?;
 
                 let call_val = builder.ins().call(func_ref, &[map_val, key_val]);
                 let val = builder.inst_results(call_val)[0];
-                self.store_variable(builder, result, val, variables, var_counter, self.pointer_type);
+
+                // For integer types, extend to i64 for consistency
+                let final_val = match value_type {
+                    IRType::Bool => builder.ins().uextend(types::I64, val),
+                    _ => val,
+                };
+
+                self.store_variable(builder, result, final_val, variables, var_counter, result_type);
             }
             Instruction::MapLen { result, map } => {
                 // Call xin_map_len(map) -> int64_t

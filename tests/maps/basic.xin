@@ -1,0 +1,24 @@
+// Test basic Map operations
+
+func main() {
+    // Create a map with integer values
+    var m = { "a": 1, "b": 2 }
+    println(`m => a: {m['a']}, b: {m['b']}`)
+
+    // Get map size
+    let size = m.map_len()
+    println(size)
+
+    // Check if key exists
+    let has_a = m.has("a")
+    println(has_a)
+
+    // Access map value
+    let val = m["a"]
+    println(val)
+
+    // Add new entry
+    m["c"] = 3
+    let has_c = m.has("c")
+    println(has_c)
+}

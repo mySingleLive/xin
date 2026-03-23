@@ -221,18 +221,20 @@ pub enum Instruction {
         result: Value,
     },
 
-    /// Set key-value: map_set map, key, value
+    /// Set key-value: map_set map, key, value, value_type
     MapSet {
         map: Value,
         key: Value,
         value: Value,
+        value_type: IRType,
     },
 
-    /// Get value: %result = map_get map, key
+    /// Get value: %result = map_get map, key, value_type
     MapGet {
         result: Value,
         map: Value,
         key: Value,
+        value_type: IRType,
     },
 
     /// Get size: %result = map_len map
@@ -434,8 +436,12 @@ impl fmt::Display for Instruction {
 
             // Map instructions
             Instruction::MapNew { result } => write!(f, "{} = map_new", result),
-            Instruction::MapSet { map, key, value } => write!(f, "map_set {}, {}, {}", map, key, value),
-            Instruction::MapGet { result, map, key } => write!(f, "{} = map_get {}, {}", result, map, key),
+            Instruction::MapSet { map, key, value, value_type } => {
+                write!(f, "map_set {}, {}, {}, ty:{}", map, key, value, value_type)
+            }
+            Instruction::MapGet { result, map, key, value_type } => {
+                write!(f, "{} = map_get {}, {}, ty:{}", result, map, key, value_type)
+            }
             Instruction::MapLen { result, map } => write!(f, "{} = map_len {}", result, map),
             Instruction::MapHas { result, map, key } => write!(f, "{} = map_has {}, {}", result, map, key),
             Instruction::MapRemove { result, map, key } => write!(f, "{} = map_remove {}, {}", result, map, key),
