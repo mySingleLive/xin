@@ -848,3 +848,20 @@ fn e2e_control_flow_if_else() {
 fn e2e_control_flow_if_else_branching() {
     run_e2e_test("control_flow", "if_else_branching");
 }
+
+// ==================== Functions E2E Tests ====================
+
+#[test]
+fn e2e_functions_basic_funcs() {
+    run_e2e_test("functions", "basic_funcs");
+}
+
+#[test]
+fn e2e_functions_recursion() {
+    run_e2e_test("functions", "recursion");
+}
+
+#[test]
+fn e2e_functions_return_test() {
+    run_e2e_test("functions", "return_test");
+}
