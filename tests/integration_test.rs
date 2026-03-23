@@ -889,3 +889,15 @@ fn e2e_arrays_nested() {
 fn e2e_nullable_basic() {
     run_e2e_test("nullable", "basic");
 }
+
+// ==================== Maps E2E Tests ====================
+
+#[test]
+fn e2e_maps_basic() {
+    run_e2e_test("maps", "basic");
+}
+
+#[test]
+fn e2e_maps_methods() {
+    run_e2e_test("maps", "methods");
+}
