@@ -792,3 +792,20 @@ fn e2e_strings_concat() {
 fn e2e_strings_printf() {
     run_e2e_test("strings", "printf");
 }
+
+// ==================== Operators E2E Tests ====================
+
+#[test]
+fn e2e_operators_comparison() {
+    run_e2e_test("operators", "comparison");
+}
+
+#[test]
+fn e2e_operators_logical() {
+    run_e2e_test("operators", "logical");
+}
+
+#[test]
+fn e2e_operators_unary() {
+    run_e2e_test("operators", "unary");
+}
