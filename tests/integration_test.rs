@@ -780,3 +780,15 @@ fn e2e_basic_types() {
 fn e2e_basic_variables() {
     run_e2e_test("basic", "variables");
 }
+
+// ==================== Strings E2E Tests ====================
+
+#[test]
+fn e2e_strings_concat() {
+    run_e2e_test("strings", "concat");
+}
+
+#[test]
+fn e2e_strings_printf() {
+    run_e2e_test("strings", "printf");
+}
