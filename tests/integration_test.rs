@@ -676,3 +676,87 @@ fn test_ir_empty_map() {
         assert!(!has_map_set, "Empty map should have no MapSet instructions");
     }
 }
+
+// ==================== E2E Tests ====================
+
+/// Helper function to run an end-to-end test
+fn run_e2e_test(category: &str, test_name: &str) {
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::process::Command;
+
+    // Get project root directory
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
+    let project_root = PathBuf::from(&manifest_dir);
+
+    // Construct paths
+    let test_dir = project_root.join("tests").join(category);
+    let xin_file = test_dir.join(format!("{}.xin", test_name));
+    let expected_file = test_dir.join(format!("{}.expected", test_name));
+
+    // Verify files exist
+    assert!(xin_file.exists(), "Test file not found: {:?}", xin_file);
+    assert!(expected_file.exists(), "Expected file not found: {:?}", expected_file);
+
+    // Create temp binary path
+    let temp_binary = env::temp_dir().join(format!("xin_e2e_{}_{}", category, test_name));
+
+    // Compile the xin file
+    let compile_output = Command::new("cargo")
+        .args(["run", "--", "compile", xin_file.to_str().unwrap(), "-o", temp_binary.to_str().unwrap()])
+        .current_dir(&project_root)
+        .output()
+        .expect("Failed to execute cargo run");
+
+    if !compile_output.status.success() {
+        panic!(
+            "Compilation failed for {}:{}\nstdout: {}\nstderr: {}",
+            category,
+            test_name,
+            String::from_utf8_lossy(&compile_output.stdout),
+            String::from_utf8_lossy(&compile_output.stderr)
+        );
+    }
+
+    // Run the compiled binary
+    let run_output = Command::new(&temp_binary)
+        .output()
+        .expect("Failed to execute compiled binary");
+
+    if !run_output.status.success() {
+        panic!(
+            "Execution failed for {}:{}\nstdout: {}\nstderr: {}",
+            category,
+            test_name,
+            String::from_utf8_lossy(&run_output.stdout),
+            String::from_utf8_lossy(&run_output.stderr)
+        );
+    }
+
+    // Read expected output
+    let expected = fs::read_to_string(&expected_file)
+        .expect("Failed to read expected file");
+
+    // Get actual output
+    let actual = String::from_utf8_lossy(&run_output.stdout);
+
+    // Normalize outputs (strip trailing whitespace per line)
+    let normalize = |s: &str| -> String {
+        s.lines().map(|line| line.trim_end()).collect::<Vec<_>>().join("\n")
+    };
+
+    let expected_normalized = normalize(&expected);
+    let actual_normalized = normalize(&actual);
+
+    // Clean up temp binary
+    let _ = fs::remove_file(&temp_binary);
+
+    assert_eq!(
+        expected_normalized,
+        actual_normalized,
+        "Output mismatch for {}:{}",
+        category,
+        test_name
+    );
+}
