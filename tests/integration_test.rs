@@ -809,3 +809,20 @@ fn e2e_operators_logical() {
 fn e2e_operators_unary() {
     run_e2e_test("operators", "unary");
 }
+
+// ==================== Templates E2E Tests ====================
+
+#[test]
+fn e2e_templates_basic() {
+    run_e2e_test("templates", "basic");
+}
+
+#[test]
+fn e2e_templates_expressions() {
+    run_e2e_test("templates", "expressions");
+}
+
+#[test]
+fn e2e_templates_escape() {
+    run_e2e_test("templates", "escape");
+}
