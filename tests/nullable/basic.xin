@@ -1,0 +1,13 @@
+// Test nullable types - Elvis operator
+
+func main() {
+    // Test Elvis operator with null
+    let a: int64? = null
+    let b = a ?? 10
+    println(b)  // Expected: 10
+
+    // Test Elvis operator with value
+    let c: int64? = 5
+    let d = c ?? 20
+    println(d)  // Expected: 5
+}

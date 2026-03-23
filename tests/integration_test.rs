@@ -882,3 +882,10 @@ fn e2e_arrays_mutable() {
 fn e2e_arrays_nested() {
     run_e2e_test("arrays", "nested");
 }
+
+// ==================== Nullable E2E Tests ====================
+
+#[test]
+fn e2e_nullable_basic() {
+    run_e2e_test("nullable", "basic");
+}
