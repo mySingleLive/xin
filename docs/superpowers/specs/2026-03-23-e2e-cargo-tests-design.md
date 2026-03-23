@@ -40,7 +40,7 @@ fn e2e_<目录>_<文件名>() { ... }
 
 ## 测试覆盖范围
 
-预计生成约 27 个测试函数：
+预计生成 26 个测试函数：
 
 | 目录 | 测试数量 | 测试文件 |
 |------|----------|----------|
@@ -49,7 +49,7 @@ fn e2e_<目录>_<文件名>() { ... }
 | `operators/` | 3 | comparison, logical, unary |
 | `templates/` | 3 | basic, expressions, escape |
 | `control_flow/` | 4 | break_continue, for_loops, if_else, if_else_branching |
-| `functions/` | 4 | basic_funcs, recursion, return_test |
+| `functions/` | 3 | basic_funcs, recursion, return_test |
 | `arrays/` | 3 | basic, mutable, nested |
 | `nullable/` | 1 | basic |
 | `maps/` | 2 | basic, methods |
@@ -60,6 +60,12 @@ fn e2e_<目录>_<文件名>() { ... }
 ### 编译器调用
 
 使用 `std::process::Command` 调用 `cargo run -- compile <source> -o <output>` 进行编译。
+
+### 错误处理
+
+- **编译失败**：测试 panic 并显示编译器错误信息
+- **执行失败**：测试 panic 并显示运行时错误信息
+- **输出不匹配**：使用 `assert_eq!` 显示期望与实际输出的差异
 
 ### 临时文件处理
 
@@ -80,4 +86,4 @@ fn normalize_output(s: &str) -> String {
 
 ## 文件变更
 
-- 修改：`tests/integration_test.rs` - 追加约 27 个测试函数
+- 修改：`tests/integration_test.rs` - 追加 26 个测试函数
