@@ -760,3 +760,23 @@ fn run_e2e_test(category: &str, test_name: &str) {
         test_name
     );
 }
+
+#[test]
+fn e2e_basic_arithmetic() {
+    run_e2e_test("basic", "arithmetic");
+}
+
+#[test]
+fn e2e_basic_type_conversion() {
+    run_e2e_test("basic", "type_conversion");
+}
+
+#[test]
+fn e2e_basic_types() {
+    run_e2e_test("basic", "types");
+}
+
+#[test]
+fn e2e_basic_variables() {
+    run_e2e_test("basic", "variables");
+}
